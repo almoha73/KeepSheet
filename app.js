@@ -1,6 +1,7 @@
 (() => {
   'use strict';
 
+  const APP_VERSION = 'v1.11';
   const STORAGE_KEY = 'keepsheet_data_v1';
   const SETTINGS_KEY = 'keepsheet_settings_v1';
   const THEME_KEY = 'keepsheet_theme_v1';
@@ -451,6 +452,23 @@
     });
 
     $('btn-export-json').addEventListener('click', exportBackupJson);
+
+    $('btn-force-update').addEventListener('click', async () => {
+      setSettingsFeedback('Mise à jour en cours...', 'info');
+      try {
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+        }
+      } catch (err) {
+        console.warn(err);
+      }
+      window.location.reload();
+    });
 
     // PWA Install Prompt (Android Chrome)
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -1572,6 +1590,8 @@
   function openSettingsDialog() {
     $('setting-api-url').value = state.settings.apiUrl;
     $('setting-api-token').value = state.settings.apiToken;
+    const versionEl = $('app-version-label');
+    if (versionEl) versionEl.textContent = `KeepSheet ${APP_VERSION}`;
     setSettingsFeedback('', 'hidden');
     const status = $('settings-connection-status');
     if (state.settings.apiUrl) {
