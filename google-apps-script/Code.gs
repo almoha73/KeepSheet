@@ -99,11 +99,11 @@ function setupTriggers() {
   const config = getConfig_();
   const hour = Math.min(23, Math.max(0, parseInt(config.DAILY_SUMMARY_HOUR || '8', 10) || 8));
 
-  ScriptApp.newTrigger('checkReminders').timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger('checkReminders').timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger('sendDailySummary').timeBased().everyDays(1).atHour(hour).create();
 
   SpreadsheetApp.getUi().alert(
-    `Déclencheurs activés ✅\n\n• Vérification des rappels : toutes les 5 minutes\n• Résumé quotidien : tous les jours vers ${hour}h`
+    `Déclencheurs activés ✅\n\n• Vérification des rappels : toutes les minutes\n• Résumé quotidien : tous les jours vers ${hour}h`
   );
 }
 
@@ -414,7 +414,7 @@ function rowToObject_(headers, row) {
   headers.forEach((h, i) => {
     let val = row[i];
     if (val instanceof Date) {
-      val = Utilities.formatDate(val, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm");
+      val = val.toISOString();
     }
     if (h === 'pinned' || h === 'archived' || h === 'done' || h === 'notified') {
       val = val === true || val === 'true' || val === 'TRUE';

@@ -192,7 +192,7 @@
         notes: '',
         done: false,
         priority: $('quick-todo-priority').value,
-        reminderAt: $('quick-todo-reminder').value || '',
+        reminderAt: fromDatetimeLocal($('quick-todo-reminder').value),
         notified: false,
         updatedAt: new Date().toISOString(),
       };
@@ -707,7 +707,8 @@
     const id = $('note-id').value;
     const title = $('note-title').value.trim();
     const content = $('note-content').value.trim();
-    const reminderAt = $('note-reminder').value || '';
+    const reminderLocal = $('note-reminder').value || '';
+    const reminderAt = fromDatetimeLocal(reminderLocal);
 
     if (!title && !content) {
       $('note-dialog').close();
@@ -720,7 +721,7 @@
     if (id) {
       note = state.notes.find((n) => n.id === id);
       if (note) {
-        const reminderChanged = toDatetimeLocal(note.reminderAt) !== reminderAt;
+        const reminderChanged = toDatetimeLocal(note.reminderAt) !== reminderLocal;
         note.title = title;
         note.content = content;
         note.color = state.editingNote.color;
@@ -775,14 +776,15 @@
 
     const notes = $('todo-notes').value.trim();
     const priority = $('todo-priority').value;
-    const reminderAt = $('todo-reminder').value || '';
+    const reminderLocal = $('todo-reminder').value || '';
+    const reminderAt = fromDatetimeLocal(reminderLocal);
     const now = new Date().toISOString();
 
     let todo;
     if (id) {
       todo = state.todos.find((t) => t.id === id);
       if (todo) {
-        const reminderChanged = toDatetimeLocal(todo.reminderAt) !== reminderAt;
+        const reminderChanged = toDatetimeLocal(todo.reminderAt) !== reminderLocal;
         todo.title = title;
         todo.notes = notes;
         todo.priority = priority;
@@ -865,9 +867,15 @@
     return true;
   }
 
+  function fromDatetimeLocal(localValue) {
+    if (!localValue) return '';
+    const d = new Date(localValue);
+    return Number.isNaN(d.getTime()) ? localValue : d.toISOString();
+  }
+
   function toDatetimeLocal(value) {
     if (!value) return '';
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) return value.slice(0, 16);
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return value;
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return '';
     const pad = (n) => String(n).padStart(2, '0');
