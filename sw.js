@@ -1,4 +1,4 @@
-const CACHE_NAME = 'keepsheet-shell-v2';
+const CACHE_NAME = 'keepsheet-shell-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -42,19 +42,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Network-first so updates appear immediately when online, with offline cache fallback
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request)
-        .then((response) => {
-          if (response && response.status === 200 && response.type === 'basic') {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-
-      return cached || fetchPromise;
-    })
+    fetch(event.request)
+      .then((response) => {
+        if (response && response.status === 200 && response.type === 'basic') {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });

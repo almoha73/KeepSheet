@@ -912,7 +912,7 @@ html[data-theme="dark"] .chip {
 .toast-container {
   position: fixed;
   left: 50%;
-  bottom: calc(24px + env(safe-area-inset-bottom));
+  top: calc(64px + env(safe-area-inset-top));
   transform: translateX(-50%);
   z-index: 1000;
   width: min(92vw, 440px);
