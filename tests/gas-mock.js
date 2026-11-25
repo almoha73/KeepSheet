@@ -27,20 +27,25 @@ function makeSheet(rows) {
         setValues(v) {
           v.forEach((row, i) => row.forEach((x, j) => {
             sh.rows[r - 1 + i] = sh.rows[r - 1 + i] || [];
-            // Émule Google Sheets : un préfixe ' force le texte et est retiré à la lecture
-            sh.rows[r - 1 + i][c - 1 + j] = typeof x === 'string' && x.startsWith("'") ? x.slice(1) : x;
+            sh.rows[r - 1 + i][c - 1 + j] = x;
           }));
           return this;
         },
         setValue(x) {
           sh.rows[r - 1] = sh.rows[r - 1] || [];
-          sh.rows[r - 1][c - 1] = typeof x === 'string' && x.startsWith("'") ? x.slice(1) : x;
+          sh.rows[r - 1][c - 1] = x;
           return this;
         },
         setFontWeight() { return this; },
         setBackground() { return this; },
         setNumberFormat(fmt) {
           for (let j = 0; j < nc; j++) sh.formats[c + j] = fmt;
+          return this;
+        },
+        setNumberFormats(matrix) {
+          if (matrix && matrix[0]) {
+            matrix[0].forEach((fmt, j) => { sh.formats[c + j] = fmt; });
+          }
           return this;
         },
       };

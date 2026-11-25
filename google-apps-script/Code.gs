@@ -74,8 +74,10 @@ function onOpen() {
 function setupProject() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  ensureSheet_(ss, SHEET_NOTES, NOTES_HEADERS);
-  ensureSheet_(ss, SHEET_TODOS, TODOS_HEADERS);
+  const notesSheet = ensureSheet_(ss, SHEET_NOTES, NOTES_HEADERS);
+  const todosSheet = ensureSheet_(ss, SHEET_TODOS, TODOS_HEADERS);
+  formatTextColumns_(notesSheet, NOTES_HEADERS, 2, Math.max(notesSheet.getMaxRows() - 1, 1));
+  formatTextColumns_(todosSheet, TODOS_HEADERS, 2, Math.max(todosSheet.getMaxRows() - 1, 1));
 
   let configSheet = ss.getSheetByName(SHEET_CONFIG);
   if (!configSheet) {
@@ -687,15 +689,29 @@ function pruneTombstones_() {
 // UTILITAIRES GOOGLE SHEETS
 // ============================================================================
 
-const TEXT_COLUMNS = ['id', 'title', 'content', 'notes', 'color', 'tags', 'recurrence'];
+const TEXT_COLUMNS = [
+  'id',
+  'title',
+  'content',
+  'notes',
+  'color',
+  'tags',
+  'recurrence',
+  'reminderAt',
+  'updatedAt',
+  'deletedAt',
+];
+
+function rowFormatsForHeaders_(headers) {
+  return headers.map((h) => (TEXT_COLUMNS.indexOf(h) !== -1 ? '@' : 'General'));
+}
 
 function formatTextColumns_(sheet, headers, startRow, numRows) {
   if (numRows < 1) return;
-  headers.forEach((h, i) => {
-    if (TEXT_COLUMNS.indexOf(h) !== -1) {
-      sheet.getRange(startRow, i + 1, numRows, 1).setNumberFormat('@');
-    }
-  });
+  const rowFmt = rowFormatsForHeaders_(headers);
+  const matrix = [];
+  for (let i = 0; i < numRows; i++) matrix.push(rowFmt);
+  sheet.getRange(startRow, 1, numRows, headers.length).setNumberFormats(matrix);
 }
 
 function ensureSheet_(ss, name, headers) {
@@ -712,8 +728,8 @@ function ensureSheet_(ss, name, headers) {
     if (existing.length < headers.length) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#e0f2fe');
+      formatTextColumns_(sheet, headers, 2, Math.max(sheet.getMaxRows() - 1, 1));
     }
-    formatTextColumns_(sheet, headers, 2, Math.max(sheet.getMaxRows() - 1, 1));
   }
   return sheet;
 }
@@ -778,13 +794,9 @@ function sanitizeForSheet_(header, val) {
   if (header === 'position') {
     return typeof val === 'number' && !isNaN(val) ? val : '';
   }
-  const str = String(val);
-  // Préfixe ' : empêche Google Sheets d'interpréter =, +, -, @ en formule
-  // ou de convertir des numéros/dates (ex: 0612345678, 10/11).
-  if (str.length > 0 && (/^[=+\-@']/.test(str) || /^0\d+$/.test(str) || /^\d{1,2}[\/\-]\d{1,2}/.test(str))) {
-    return "'" + str;
-  }
-  return str;
+  // Les colonnes texte sont formatées en '@' (texte brut) avant setValues :
+  // ne pas ajouter de préfixe ' qui deviendrait littéral dans une cellule '@'.
+  return String(val);
 }
 
 function upsertRecord_(sheetName, headers, record) {

@@ -95,17 +95,27 @@ test('le webhook ignore un autre chat', () => {
   assert.strictEqual(api('getAll').todos.length, 0);
 });
 
-test('les formules, téléphones et dates sont protégés à l’écriture', () => {
-  const { api, ctx } = loadBackend();
-  assert.strictEqual(ctx.sanitizeForSheet_('title', '=50€'), "'=50€");
-  assert.strictEqual(ctx.sanitizeForSheet_('title', '+33612345678'), "'+33612345678");
-  assert.strictEqual(ctx.sanitizeForSheet_('title', '0612345678'), "'0612345678");
-  assert.strictEqual(ctx.sanitizeForSheet_('title', '10/11'), "'10/11");
-  assert.strictEqual(ctx.sanitizeForSheet_('content', '- [ ] Pain'), "'- [ ] Pain");
-  api('saveNote', { id: 'n1', title: '=50€', content: '+33612345678', updatedAt: iso(0) });
+test('les textes spéciaux (checklists, formules, téléphones, heures) restent intacts sans apostrophe parasite', () => {
+  const { api, sheets } = loadBackend();
+  api('saveNote', {
+    id: 'n1',
+    title: '=50€',
+    content: '- [ ] Pain\n- [x] Lait',
+    tags: '12:30, 50%, 0612345678',
+    updatedAt: iso(0),
+  });
+  // Colonnes texte Notes : id(1), title(2), content(3), color(4), reminderAt(7), updatedAt(9), tags(10), recurrence(11), deletedAt(13)
+  [1, 2, 3, 4, 7, 9, 10, 11, 13].forEach((col) => {
+    assert.strictEqual(sheets.Notes.formats[col], '@');
+  });
+  // Colonnes non-texte restent en format General (pinned=5, archived=6, notified=8, position=12)
+  [5, 6, 8, 12].forEach((col) => {
+    assert.strictEqual(sheets.Notes.formats[col], 'General');
+  });
   const saved = api('getAll').notes[0];
   assert.strictEqual(saved.title, '=50€');
-  assert.strictEqual(saved.content, '+33612345678');
+  assert.strictEqual(saved.content, '- [ ] Pain\n- [x] Lait');
+  assert.strictEqual(saved.tags, '12:30, 50%, 0612345678');
 });
 
 test('les messages Telegram > 4096 caractères sont tronqués sans casser le HTML ni les entités', () => {
@@ -121,19 +131,6 @@ test('les messages Telegram > 4096 caractères sont tronqués sans casser le HTM
   const truncated = ctx.truncateTelegramHtml_(edgeMsg, 3900);
   assert.ok(!truncated.includes('&a\n'));
   assert.ok(truncated.startsWith('a'.repeat(3898) + '\n'));
-});
-
-test('les colonnes texte sont formatées en texte brut (@) dans Sheets', () => {
-  const { api, sheets } = loadBackend();
-  api('saveNote', { id: 'n1', title: '12:30', content: '50%', tags: '1234', updatedAt: iso(0) });
-  // Colonnes Notes : 1=id, 2=title, 3=content, 4=color, 10=tags, 11=recurrence
-  [1, 2, 3, 4, 10, 11].forEach((col) => {
-    assert.strictEqual(sheets.Notes.formats[col], '@');
-  });
-  const saved = api('getAll').notes[0];
-  assert.strictEqual(saved.title, '12:30');
-  assert.strictEqual(saved.content, '50%');
-  assert.strictEqual(saved.tags, '1234');
 });
 
 test('la récurrence mensuelle le 31 janvier passe au 28 février', () => {
