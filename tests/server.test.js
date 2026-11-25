@@ -108,13 +108,32 @@ test('les formules, téléphones et dates sont protégés à l’écriture', () 
   assert.strictEqual(saved.content, '+33612345678');
 });
 
-test('les messages Telegram > 4096 caractères sont tronqués sans casser le HTML', () => {
+test('les messages Telegram > 4096 caractères sont tronqués sans casser le HTML ni les entités', () => {
   const { ctx, telegram } = loadBackend();
   const longMsg = '<b>Titre</b>\n' + 'a'.repeat(5000);
   ctx.sendTelegramMessage_(longMsg);
   assert.strictEqual(telegram.length, 1);
   assert.ok(telegram[0].payload.text.length <= 4096);
   assert.ok(telegram[0].payload.text.includes('tronqué'));
+
+  // Entité &amp; coupée pile à la limite (3900)
+  const edgeMsg = 'a'.repeat(3898) + '&amp;suite';
+  const truncated = ctx.truncateTelegramHtml_(edgeMsg, 3900);
+  assert.ok(!truncated.includes('&a\n'));
+  assert.ok(truncated.startsWith('a'.repeat(3898) + '\n'));
+});
+
+test('les colonnes texte sont formatées en texte brut (@) dans Sheets', () => {
+  const { api, sheets } = loadBackend();
+  api('saveNote', { id: 'n1', title: '12:30', content: '50%', tags: '1234', updatedAt: iso(0) });
+  // Colonnes Notes : 1=id, 2=title, 3=content, 4=color, 10=tags, 11=recurrence
+  [1, 2, 3, 4, 10, 11].forEach((col) => {
+    assert.strictEqual(sheets.Notes.formats[col], '@');
+  });
+  const saved = api('getAll').notes[0];
+  assert.strictEqual(saved.title, '12:30');
+  assert.strictEqual(saved.content, '50%');
+  assert.strictEqual(saved.tags, '1234');
 });
 
 test('la récurrence mensuelle le 31 janvier passe au 28 février', () => {

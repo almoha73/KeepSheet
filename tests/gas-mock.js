@@ -5,9 +5,12 @@ const vm = require('vm');
 const crypto = require('crypto');
 
 function makeSheet(rows) {
+  const formats = {};
   return {
     rows,
+    formats,
     getLastRow() { return this.rows.length; },
+    getMaxRows() { return Math.max(this.rows.length, 100); },
     getLastColumn() { return this.rows[0] ? this.rows[0].length : 0; },
     getRange(r, c, nr = 1, nc = 1) {
       const sh = this;
@@ -36,7 +39,10 @@ function makeSheet(rows) {
         },
         setFontWeight() { return this; },
         setBackground() { return this; },
-        setNumberFormat() { return this; },
+        setNumberFormat(fmt) {
+          for (let j = 0; j < nc; j++) sh.formats[c + j] = fmt;
+          return this;
+        },
       };
     },
     appendRow(v) { this.rows.push(v); },

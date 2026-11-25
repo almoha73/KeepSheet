@@ -432,7 +432,10 @@ function sendManualItem_(type, item) {
 function truncateTelegramHtml_(htmlText, maxLen) {
   const str = String(htmlText || '');
   if (str.length <= maxLen) return str;
-  let cut = str.slice(0, maxLen).replace(/<[^>]*$/, '');
+  let cut = str
+    .slice(0, maxLen)
+    .replace(/<[^>]*$/, '')
+    .replace(/&[a-zA-Z0-9#]*$/, '');
   ['code', 'i', 'b'].forEach((tag) => {
     const opens = (cut.match(new RegExp('<' + tag + '>', 'g')) || []).length;
     const closes = (cut.match(new RegExp('</' + tag + '>', 'g')) || []).length;
@@ -684,6 +687,17 @@ function pruneTombstones_() {
 // UTILITAIRES GOOGLE SHEETS
 // ============================================================================
 
+const TEXT_COLUMNS = ['id', 'title', 'content', 'notes', 'color', 'tags', 'recurrence'];
+
+function formatTextColumns_(sheet, headers, startRow, numRows) {
+  if (numRows < 1) return;
+  headers.forEach((h, i) => {
+    if (TEXT_COLUMNS.indexOf(h) !== -1) {
+      sheet.getRange(startRow, i + 1, numRows, 1).setNumberFormat('@');
+    }
+  });
+}
+
 function ensureSheet_(ss, name, headers) {
   let sheet = ss.getSheetByName(name);
   if (!sheet) {
@@ -691,6 +705,7 @@ function ensureSheet_(ss, name, headers) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#e0f2fe');
     sheet.setFrozenRows(1);
+    formatTextColumns_(sheet, headers, 2, Math.max(sheet.getMaxRows() - 1, 1));
   } else {
     const currentCols = Math.max(sheet.getLastColumn(), 0);
     const existing = currentCols > 0 ? sheet.getRange(1, 1, 1, currentCols).getValues()[0] : [];
@@ -698,6 +713,7 @@ function ensureSheet_(ss, name, headers) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#e0f2fe');
     }
+    formatTextColumns_(sheet, headers, 2, Math.max(sheet.getMaxRows() - 1, 1));
   }
   return sheet;
 }
@@ -814,12 +830,15 @@ function upsertRecord_(sheetName, headers, record) {
         }
       }
 
+      formatTextColumns_(sheet, headers, rowNum, 1);
       sheet.getRange(rowNum, 1, 1, headers.length).setValues([values]);
       return true;
     }
   }
 
-  sheet.getRange(lastRow + 1, 1, 1, headers.length).setValues([values]);
+  const targetRow = lastRow + 1;
+  formatTextColumns_(sheet, headers, targetRow, 1);
+  sheet.getRange(targetRow, 1, 1, headers.length).setValues([values]);
   return true;
 }
 
@@ -875,6 +894,8 @@ function rowToObject_(headers, row) {
     }
     if (h === 'pinned' || h === 'archived' || h === 'done' || h === 'notified') {
       val = val === true || val === 'true' || val === 'TRUE';
+    } else if (TEXT_COLUMNS.indexOf(h) !== -1) {
+      val = val === '' || val === null || val === undefined ? '' : String(val);
     }
     obj[h] = val;
   });
