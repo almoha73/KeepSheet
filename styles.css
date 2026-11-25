@@ -333,6 +333,46 @@ body {
   transform: translateY(-2px);
 }
 
+.note-card.dragging {
+  opacity: 0.45;
+  transform: scale(0.98);
+}
+
+.note-card.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+}
+
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1rem;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+  background: var(--surface-hover);
+}
+
+.note-card-header-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
 .note-card[data-color="coral"] { background: var(--note-coral); border-color: transparent; }
 .note-card[data-color="peach"] { background: var(--note-peach); border-color: transparent; }
 .note-card[data-color="sand"] { background: var(--note-sand); border-color: transparent; }

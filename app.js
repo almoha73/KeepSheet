@@ -562,6 +562,15 @@
     return '';
   }
 
+  function sortNotesList(list) {
+    return list.sort((a, b) => {
+      const pa = typeof a.position === 'number' && !Number.isNaN(a.position) ? a.position : Number.MAX_SAFE_INTEGER;
+      const pb = typeof b.position === 'number' && !Number.isNaN(b.position) ? b.position : Number.MAX_SAFE_INTEGER;
+      if (pa !== pb) return pa - pb;
+      return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
+    });
+  }
+
   function renderNotes() {
     const nonArchived = state.notes.filter((n) => !n.archived);
     if (state.notesTagFilter && !nonArchived.some((n) => hasTag(n, state.notesTagFilter))) {
@@ -572,13 +581,13 @@
       renderNotes();
     });
 
-    const activeNotes = nonArchived
-      .filter(
+    const activeNotes = sortNotesList(
+      nonArchived.filter(
         (n) =>
           hasTag(n, state.notesTagFilter) &&
           matchesSearch(`${n.title} ${n.content} ${n.tags || ''}`)
       )
-      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+    );
 
     const pinned = activeNotes.filter((n) => n.pinned);
     const others = activeNotes.filter((n) => !n.pinned);
@@ -613,6 +622,8 @@
   function createNoteCard(note) {
     const card = document.createElement('article');
     card.className = 'note-card';
+    card.dataset.id = note.id;
+    card.dataset.pinned = String(Boolean(note.pinned));
     card.dataset.color = note.color || 'default';
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
@@ -621,12 +632,28 @@
     const header = document.createElement('div');
     header.className = 'note-card-header';
 
+    const headerLeft = document.createElement('div');
+    headerLeft.className = 'note-card-header-left';
+
+    if (!note.archived) {
+      const handle = document.createElement('button');
+      handle.type = 'button';
+      handle.className = 'drag-handle';
+      handle.title = 'Glisser pour réorganiser';
+      handle.setAttribute('aria-label', 'Glisser pour réorganiser');
+      handle.textContent = '⠿';
+      handle.addEventListener('click', (e) => e.stopPropagation());
+      handle.addEventListener('pointerdown', (e) => startNoteDrag(e, card, note));
+      headerLeft.appendChild(handle);
+    }
+
     if (note.title) {
       const h3 = document.createElement('h3');
       h3.className = 'note-card-title';
       h3.textContent = note.title;
-      header.appendChild(h3);
+      headerLeft.appendChild(h3);
     }
+    header.appendChild(headerLeft);
 
     const pinBtn = document.createElement('button');
     pinBtn.type = 'button';
@@ -737,6 +764,76 @@
       }
     });
     return card;
+  }
+
+  // ---------- DRAG & DROP NOTES (Mouse + Android Touch) ----------
+  function startNoteDrag(e, sourceCard, sourceNote) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const grid = sourceCard.parentElement;
+    if (!grid) return;
+
+    sourceCard.classList.add('dragging');
+    let currentOver = null;
+
+    const onMove = (ev) => {
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const targetCard = el ? el.closest('.note-card') : null;
+
+      if (currentOver && currentOver !== targetCard) {
+        currentOver.classList.remove('drag-over');
+        currentOver = null;
+      }
+
+      if (
+        targetCard &&
+        targetCard !== sourceCard &&
+        targetCard.parentElement === grid
+      ) {
+        currentOver = targetCard;
+        currentOver.classList.add('drag-over');
+      }
+    };
+
+    const cleanup = () => {
+      sourceCard.classList.remove('dragging');
+      if (currentOver) currentOver.classList.remove('drag-over');
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+
+    const onCancel = () => cleanup();
+
+    const onUp = () => {
+      const targetId = currentOver ? currentOver.dataset.id : null;
+      cleanup();
+      if (!targetId || targetId === sourceNote.id) return;
+
+      const sameGroup = sortNotesList(
+        state.notes.filter((n) => !n.archived && Boolean(n.pinned) === Boolean(sourceNote.pinned))
+      );
+      const fromIdx = sameGroup.findIndex((n) => n.id === sourceNote.id);
+      const toIdx = sameGroup.findIndex((n) => n.id === targetId);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+
+      const [moved] = sameGroup.splice(fromIdx, 1);
+      sameGroup.splice(toIdx, 0, moved);
+
+      const updates = sameGroup.map((n, index) => {
+        n.position = index;
+        return { id: n.id, position: index };
+      });
+
+      saveLocalData();
+      renderNotes();
+      pushAction('reorderNotes', { order: updates });
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
   }
 
   function renderTodos() {
@@ -1073,6 +1170,10 @@
     }
 
     if (!note) {
+      const existingPositions = state.notes
+        .map((n) => n.position)
+        .filter((p) => typeof p === 'number' && !Number.isNaN(p));
+      const topPosition = existingPositions.length ? Math.min(...existingPositions) - 1 : 0;
       note = {
         id: createId('note'),
         title,
@@ -1084,6 +1185,7 @@
         reminderAt,
         recurrence,
         notified: false,
+        position: topPosition,
         updatedAt: now,
       };
       state.notes.unshift(note);

@@ -27,6 +27,7 @@ const NOTES_HEADERS = [
   'updatedAt',
   'tags',
   'recurrence',
+  'position',
 ];
 
 const TODOS_HEADERS = [
@@ -162,6 +163,10 @@ function doPost(e) {
 
       case 'deleteNote':
         deleteRecord_(SHEET_NOTES, payload.id);
+        return jsonResponse_({ ok: true });
+
+      case 'reorderNotes':
+        reorderNotes_(payload.order || []);
         return jsonResponse_({ ok: true });
 
       case 'saveTodo':
@@ -460,6 +465,28 @@ function deleteRecord_(sheetName, id) {
   if (existingIndex !== -1) {
     sheet.deleteRow(existingIndex + 2);
   }
+}
+
+function reorderNotes_(orderList) {
+  if (!Array.isArray(orderList) || orderList.length === 0) return;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ensureSheet_(ss, SHEET_NOTES, NOTES_HEADERS);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  const posMap = {};
+  orderList.forEach((item) => {
+    if (item && item.id !== undefined) posMap[item.id] = Number(item.position);
+  });
+
+  const posCol = NOTES_HEADERS.indexOf('position') + 1;
+  const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat();
+  const currentPos = sheet.getRange(2, posCol, lastRow - 1, 1).getValues();
+  const updated = currentPos.map((cell, i) => {
+    const id = ids[i];
+    return [posMap[id] !== undefined ? posMap[id] : cell[0]];
+  });
+  sheet.getRange(2, posCol, lastRow - 1, 1).setValues(updated);
 }
 
 function rowToObject_(headers, row) {
