@@ -25,6 +25,8 @@ const NOTES_HEADERS = [
   'reminderAt',
   'notified',
   'updatedAt',
+  'tags',
+  'recurrence',
 ];
 
 const TODOS_HEADERS = [
@@ -36,6 +38,8 @@ const TODOS_HEADERS = [
   'reminderAt',
   'notified',
   'updatedAt',
+  'tags',
+  'recurrence',
 ];
 
 /**
@@ -211,7 +215,7 @@ function checkReminders() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   // 1. Notes
-  const notesSheet = ss.getSheetByName(SHEET_NOTES);
+  const notesSheet = ensureSheet_(ss, SHEET_NOTES, NOTES_HEADERS);
   if (notesSheet && notesSheet.getLastRow() > 1) {
     const rows = notesSheet.getRange(2, 1, notesSheet.getLastRow() - 1, NOTES_HEADERS.length).getValues();
     rows.forEach((row, index) => {
@@ -219,18 +223,26 @@ function checkReminders() {
       if (note.archived || note.notified || !note.reminderAt) return;
       const reminderDate = parseDate_(note.reminderAt);
       if (reminderDate && reminderDate <= now) {
+        const recLabel = recurrenceLabel_(note.recurrence);
         const msg =
-          `🔔 <b>Rappel Note</b>\n` +
+          `🔔 <b>Rappel Note${recLabel ? ' (' + recLabel + ')' : ''}</b>\n` +
           `📌 <b>${escapeHtml_(note.title || 'Note sans titre')}</b>` +
           (note.content ? `\n\n${escapeHtml_(note.content)}` : '');
         sendTelegramMessage_(msg);
-        notesSheet.getRange(index + 2, NOTES_HEADERS.indexOf('notified') + 1).setValue(true);
+
+        const nextDate = advanceRecurrenceDate_(reminderDate, note.recurrence, now);
+        if (nextDate) {
+          notesSheet.getRange(index + 2, NOTES_HEADERS.indexOf('reminderAt') + 1).setValue(nextDate.toISOString());
+          notesSheet.getRange(index + 2, NOTES_HEADERS.indexOf('notified') + 1).setValue(false);
+        } else {
+          notesSheet.getRange(index + 2, NOTES_HEADERS.indexOf('notified') + 1).setValue(true);
+        }
       }
     });
   }
 
   // 2. Todos
-  const todosSheet = ss.getSheetByName(SHEET_TODOS);
+  const todosSheet = ensureSheet_(ss, SHEET_TODOS, TODOS_HEADERS);
   if (todosSheet && todosSheet.getLastRow() > 1) {
     const rows = todosSheet.getRange(2, 1, todosSheet.getLastRow() - 1, TODOS_HEADERS.length).getValues();
     rows.forEach((row, index) => {
@@ -239,15 +251,49 @@ function checkReminders() {
       const reminderDate = parseDate_(todo.reminderAt);
       if (reminderDate && reminderDate <= now) {
         const prio = todo.priority === 'high' ? ' 🔥 (Haute priorité)' : '';
+        const recLabel = recurrenceLabel_(todo.recurrence);
         const msg =
-          `⏰ <b>Rappel Tâche${prio}</b>\n` +
+          `⏰ <b>Rappel Tâche${prio}${recLabel ? ' (' + recLabel + ')' : ''}</b>\n` +
           `☑️ <b>${escapeHtml_(todo.title || 'Tâche')}</b>` +
           (todo.notes ? `\n\n${escapeHtml_(todo.notes)}` : '');
         sendTelegramMessage_(msg);
-        todosSheet.getRange(index + 2, TODOS_HEADERS.indexOf('notified') + 1).setValue(true);
+
+        const nextDate = advanceRecurrenceDate_(reminderDate, todo.recurrence, now);
+        if (nextDate) {
+          todosSheet.getRange(index + 2, TODOS_HEADERS.indexOf('reminderAt') + 1).setValue(nextDate.toISOString());
+          todosSheet.getRange(index + 2, TODOS_HEADERS.indexOf('notified') + 1).setValue(false);
+        } else {
+          todosSheet.getRange(index + 2, TODOS_HEADERS.indexOf('notified') + 1).setValue(true);
+        }
       }
     });
   }
+}
+
+function advanceRecurrenceDate_(date, recurrence, now) {
+  if (!recurrence || !date) return null;
+  const next = new Date(date.getTime());
+  let guard = 0;
+  while (next <= now && guard < 400) {
+    if (recurrence === 'daily') {
+      next.setDate(next.getDate() + 1);
+    } else if (recurrence === 'weekly') {
+      next.setDate(next.getDate() + 7);
+    } else if (recurrence === 'monthly') {
+      next.setMonth(next.getMonth() + 1);
+    } else {
+      return null;
+    }
+    guard++;
+  }
+  return next;
+}
+
+function recurrenceLabel_(recurrence) {
+  if (recurrence === 'daily') return '🔁 Tous les jours';
+  if (recurrence === 'weekly') return '🔁 Toutes les semaines';
+  if (recurrence === 'monthly') return '🔁 Tous les mois';
+  return '';
 }
 
 /**
@@ -338,6 +384,13 @@ function ensureSheet_(ss, name, headers) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#e0f2fe');
     sheet.setFrozenRows(1);
+  } else {
+    const currentCols = Math.max(sheet.getLastColumn(), 0);
+    const existing = currentCols > 0 ? sheet.getRange(1, 1, 1, currentCols).getValues()[0] : [];
+    if (existing.length < headers.length) {
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#e0f2fe');
+    }
   }
   return sheet;
 }

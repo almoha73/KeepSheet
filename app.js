@@ -10,6 +10,8 @@
     todos: [],
     currentView: 'notes',
     todoFilter: 'all',
+    notesTagFilter: '',
+    todosTagFilter: '',
     searchQuery: '',
     settings: {
       apiUrl: '',
@@ -19,6 +21,8 @@
       color: 'default',
       pinned: false,
       archived: false,
+      isChecklist: false,
+      checklistItems: [],
     },
     deferredInstallPrompt: null,
     isSyncing: false,
@@ -194,6 +198,8 @@
         priority: $('quick-todo-priority').value,
         reminderAt: fromDatetimeLocal($('quick-todo-reminder').value),
         notified: false,
+        tags: state.todosTagFilter || '',
+        recurrence: $('quick-todo-recurrence').value || '',
         updatedAt: new Date().toISOString(),
       };
 
@@ -205,6 +211,7 @@
       titleInput.value = '';
       $('quick-todo-priority').value = 'normal';
       $('quick-todo-reminder').value = '';
+      $('quick-todo-recurrence').value = '';
       showToast('Tâche ajoutée');
       pushAction('saveTodo', todo);
     });
@@ -254,6 +261,23 @@
 
     $('note-clear-reminder').addEventListener('click', () => {
       $('note-reminder').value = '';
+      $('note-recurrence').value = '';
+    });
+
+    $('mode-text-btn').addEventListener('click', () => setNoteEditorMode(false));
+    $('mode-checklist-btn').addEventListener('click', () => setNoteEditorMode(true));
+
+    $('checklist-add-btn').addEventListener('click', addChecklistItemFromInput);
+    $('checklist-new-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addChecklistItemFromInput();
+      }
+    });
+
+    $('todo-clear-reminder').addEventListener('click', () => {
+      $('todo-reminder').value = '';
+      $('todo-recurrence').value = '';
     });
 
     $('note-form').addEventListener('submit', (e) => {
@@ -275,7 +299,9 @@
 
     $('note-telegram-btn').addEventListener('click', () => {
       const title = $('note-title').value.trim() || 'Note sans titre';
-      const content = $('note-content').value.trim();
+      const content = state.editingNote.isChecklist
+        ? serializeChecklist(state.editingNote.checklistItems)
+        : $('note-content').value.trim();
       const reminderAt = $('note-reminder').value;
       sendTelegramItem('note', { title, content, reminderAt });
     });
@@ -430,9 +456,128 @@
     return (text || '').toLowerCase().includes(state.searchQuery);
   }
 
+  function parseTags(tagsStr) {
+    if (!tagsStr) return [];
+    const seen = new Set();
+    return String(tagsStr)
+      .split(',')
+      .map((t) => t.trim().replace(/^#/, ''))
+      .filter((t) => {
+        if (!t) return false;
+        const key = t.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  function normalizeTags(tagsStr) {
+    return parseTags(tagsStr).join(', ');
+  }
+
+  function getAllTags(items) {
+    const map = new Map();
+    items.forEach((item) => {
+      parseTags(item.tags).forEach((tag) => {
+        const key = tag.toLowerCase();
+        if (!map.has(key)) map.set(key, tag);
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'fr'));
+  }
+
+  function hasTag(item, targetTag) {
+    if (!targetTag) return true;
+    const lower = targetTag.toLowerCase();
+    return parseTags(item.tags).some((t) => t.toLowerCase() === lower);
+  }
+
+  function renderTagFilterBar(containerId, items, activeTag, onSelect) {
+    const bar = $(containerId);
+    if (!bar) return;
+    const tags = getAllTags(items);
+    if (tags.length === 0) {
+      bar.innerHTML = '';
+      bar.classList.add('hidden');
+      return;
+    }
+
+    bar.classList.remove('hidden');
+    bar.innerHTML = '';
+
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    allBtn.className = `pill${!activeTag ? ' active' : ''}`;
+    allBtn.textContent = 'Toutes étiquettes';
+    allBtn.addEventListener('click', () => onSelect(''));
+    bar.appendChild(allBtn);
+
+    tags.forEach((tag) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const isActive = activeTag && activeTag.toLowerCase() === tag.toLowerCase();
+      btn.className = `pill${isActive ? ' active' : ''}`;
+      btn.textContent = `#${tag}`;
+      btn.addEventListener('click', () => onSelect(isActive ? '' : tag));
+      bar.appendChild(btn);
+    });
+  }
+
+  function isChecklistContent(content) {
+    if (!content) return false;
+    const lines = String(content)
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    return lines.length > 0 && lines.every((l) => /^- \[[ xX]\] /.test(l));
+  }
+
+  function parseChecklist(content) {
+    if (!content) return [];
+    return String(content)
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const match = line.match(/^- \[([ xX])\] (.*)$/);
+        if (match) {
+          return { checked: match[1].toLowerCase() === 'x', text: match[2] };
+        }
+        return { checked: false, text: line };
+      });
+  }
+
+  function serializeChecklist(items) {
+    return (items || [])
+      .map((item) => ({ checked: Boolean(item.checked), text: String(item.text || '').trim() }))
+      .filter((item) => item.text.length > 0)
+      .map((item) => `- [${item.checked ? 'x' : ' '}] ${item.text}`)
+      .join('\n');
+  }
+
+  function recurrenceShortLabel(recurrence) {
+    if (recurrence === 'daily') return '🔁/j';
+    if (recurrence === 'weekly') return '🔁/sem';
+    if (recurrence === 'monthly') return '🔁/mois';
+    return '';
+  }
+
   function renderNotes() {
-    const activeNotes = state.notes
-      .filter((n) => !n.archived && matchesSearch(`${n.title} ${n.content}`))
+    const nonArchived = state.notes.filter((n) => !n.archived);
+    if (state.notesTagFilter && !nonArchived.some((n) => hasTag(n, state.notesTagFilter))) {
+      state.notesTagFilter = '';
+    }
+    renderTagFilterBar('notes-tag-bar', nonArchived, state.notesTagFilter, (tag) => {
+      state.notesTagFilter = tag;
+      renderNotes();
+    });
+
+    const activeNotes = nonArchived
+      .filter(
+        (n) =>
+          hasTag(n, state.notesTagFilter) &&
+          matchesSearch(`${n.title} ${n.content} ${n.tags || ''}`)
+      )
       .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
     const pinned = activeNotes.filter((n) => n.pinned);
@@ -501,17 +646,64 @@
     card.appendChild(header);
 
     if (note.content) {
-      const p = document.createElement('p');
-      p.className = 'note-card-body';
-      p.textContent = note.content;
-      card.appendChild(p);
+      if (isChecklistContent(note.content)) {
+        const items = parseChecklist(note.content);
+        const listEl = document.createElement('div');
+        listEl.className = 'note-checklist-preview';
+
+        const maxVisible = 6;
+        items.slice(0, maxVisible).forEach((item, idx) => {
+          const row = document.createElement('label');
+          row.className = `note-checklist-item${item.checked ? ' checked' : ''}`;
+          row.addEventListener('click', (e) => e.stopPropagation());
+
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = item.checked;
+          cb.addEventListener('change', () => {
+            items[idx].checked = cb.checked;
+            note.content = serializeChecklist(items);
+            note.updatedAt = new Date().toISOString();
+            saveLocalData();
+            renderAll();
+            pushAction('saveNote', note);
+          });
+
+          const span = document.createElement('span');
+          span.textContent = item.text;
+
+          row.appendChild(cb);
+          row.appendChild(span);
+          listEl.appendChild(row);
+        });
+
+        if (items.length > maxVisible) {
+          const more = document.createElement('div');
+          more.className = 'note-checklist-more';
+          more.textContent = `+ ${items.length - maxVisible} autre(s) élément(s)`;
+          listEl.appendChild(more);
+        }
+        card.appendChild(listEl);
+      } else {
+        const p = document.createElement('p');
+        p.className = 'note-card-body';
+        p.textContent = note.content;
+        card.appendChild(p);
+      }
     }
 
     const footer = document.createElement('div');
     footer.className = 'note-card-footer';
 
+    parseTags(note.tags).forEach((tag) => {
+      const chip = document.createElement('span');
+      chip.className = 'chip tag-chip';
+      chip.textContent = `#${tag}`;
+      footer.appendChild(chip);
+    });
+
     if (note.reminderAt) {
-      footer.appendChild(createReminderChip(note.reminderAt, note.notified));
+      footer.appendChild(createReminderChip(note.reminderAt, note.notified, false, note.recurrence));
     }
 
     const actions = document.createElement('div');
@@ -550,6 +742,14 @@
   function renderTodos() {
     const priorityRank = { high: 0, normal: 1, low: 2 };
 
+    if (state.todosTagFilter && !state.todos.some((t) => hasTag(t, state.todosTagFilter))) {
+      state.todosTagFilter = '';
+    }
+    renderTagFilterBar('todos-tag-bar', state.todos, state.todosTagFilter, (tag) => {
+      state.todosTagFilter = tag;
+      renderTodos();
+    });
+
     const total = state.todos.length;
     const doneCount = state.todos.filter((t) => t.done).length;
     const pct = total ? Math.round((doneCount / total) * 100) : 0;
@@ -558,7 +758,8 @@
 
     const filtered = state.todos
       .filter((t) => {
-        if (!matchesSearch(`${t.title} ${t.notes}`)) return false;
+        if (!hasTag(t, state.todosTagFilter)) return false;
+        if (!matchesSearch(`${t.title} ${t.notes} ${t.tags || ''}`)) return false;
         if (state.todoFilter === 'active') return !t.done;
         if (state.todoFilter === 'done') return t.done;
         if (state.todoFilter === 'high') return !t.done && t.priority === 'high';
@@ -629,8 +830,15 @@
         meta.appendChild(chip);
       }
 
+      parseTags(todo.tags).forEach((tag) => {
+        const chip = document.createElement('span');
+        chip.className = 'chip tag-chip';
+        chip.textContent = `#${tag}`;
+        meta.appendChild(chip);
+      });
+
       if (todo.reminderAt) {
-        meta.appendChild(createReminderChip(todo.reminderAt, todo.notified, todo.done));
+        meta.appendChild(createReminderChip(todo.reminderAt, todo.notified, todo.done, todo.recurrence));
       }
 
       if (meta.childElementCount > 0) content.appendChild(meta);
@@ -651,7 +859,7 @@
     $('todos-empty').classList.toggle('hidden', filtered.length > 0);
   }
 
-  function createReminderChip(reminderAt, notified, done = false) {
+  function createReminderChip(reminderAt, notified, done = false, recurrence = '') {
     const chip = document.createElement('span');
     chip.className = 'chip';
     const d = new Date(reminderAt);
@@ -668,25 +876,37 @@
           minute: '2-digit',
         })
       : reminderAt;
-    chip.textContent = `${notified ? '✈️' : '🔔'} ${formatted}`;
+    const rec = recurrenceShortLabel(recurrence);
+    chip.textContent = `${notified ? '✈️' : '🔔'} ${formatted}${rec ? ' ' + rec : ''}`;
     return chip;
   }
 
   // ---------- DIALOGS ----------
   function openNoteDialog(note) {
     const isEdit = Boolean(note);
+    const rawContent = isEdit ? note.content || '' : '';
+    const isChecklist = isEdit && isChecklistContent(rawContent);
+
     $('note-dialog-title').textContent = isEdit ? 'Modifier la note' : 'Nouvelle note';
     $('note-id').value = isEdit ? note.id : '';
     $('note-title').value = isEdit ? note.title || '' : '';
-    $('note-content').value = isEdit ? note.content || '' : '';
+    $('note-content').value = rawContent;
+    $('note-tags').value = isEdit ? note.tags || '' : state.notesTagFilter || '';
     $('note-reminder').value = isEdit ? toDatetimeLocal(note.reminderAt) : '';
+    $('note-recurrence').value = isEdit ? note.recurrence || '' : '';
+    $('checklist-new-input').value = '';
 
     state.editingNote = {
       color: isEdit ? note.color || 'default' : 'default',
       pinned: isEdit ? Boolean(note.pinned) : false,
       archived: isEdit ? Boolean(note.archived) : false,
+      isChecklist,
+      checklistItems: isChecklist ? parseChecklist(rawContent) : [],
     };
 
+    renderChecklistEditor();
+    updateNoteEditorModeUI();
+    renderNoteTagSuggestions();
     selectNoteColor(state.editingNote.color);
     $('note-pin-btn').setAttribute('aria-pressed', String(state.editingNote.pinned));
     $('note-archive-btn').setAttribute('aria-pressed', String(state.editingNote.archived));
@@ -694,6 +914,110 @@
 
     $('note-dialog').showModal();
     $('note-title').focus();
+  }
+
+  function setNoteEditorMode(toChecklist) {
+    if (state.editingNote.isChecklist === toChecklist) return;
+    if (toChecklist) {
+      state.editingNote.checklistItems = parseChecklist($('note-content').value);
+      state.editingNote.isChecklist = true;
+      renderChecklistEditor();
+    } else {
+      const pending = $('checklist-new-input').value.trim();
+      if (pending) {
+        state.editingNote.checklistItems.push({ checked: false, text: pending });
+        $('checklist-new-input').value = '';
+      }
+      $('note-content').value = state.editingNote.checklistItems
+        .map((i) => i.text)
+        .filter(Boolean)
+        .join('\n');
+      state.editingNote.isChecklist = false;
+    }
+    updateNoteEditorModeUI();
+  }
+
+  function updateNoteEditorModeUI() {
+    const isChecklist = state.editingNote.isChecklist;
+    $('mode-text-btn').classList.toggle('active', !isChecklist);
+    $('mode-checklist-btn').classList.toggle('active', isChecklist);
+    $('note-content').classList.toggle('hidden', isChecklist);
+    $('note-checklist-editor').classList.toggle('hidden', !isChecklist);
+  }
+
+  function renderChecklistEditor() {
+    const container = $('checklist-items');
+    container.innerHTML = '';
+    state.editingNote.checklistItems.forEach((item, idx) => {
+      const row = document.createElement('div');
+      row.className = `checklist-row${item.checked ? ' checked' : ''}`;
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = Boolean(item.checked);
+      cb.addEventListener('change', () => {
+        item.checked = cb.checked;
+        row.classList.toggle('checked', item.checked);
+      });
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = item.text || '';
+      input.addEventListener('input', () => {
+        item.text = input.value;
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          $('checklist-new-input').focus();
+        }
+      });
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'icon-btn small';
+      delBtn.textContent = '✕';
+      delBtn.setAttribute('aria-label', 'Supprimer cet élément');
+      delBtn.addEventListener('click', () => {
+        state.editingNote.checklistItems.splice(idx, 1);
+        renderChecklistEditor();
+      });
+
+      row.appendChild(cb);
+      row.appendChild(input);
+      row.appendChild(delBtn);
+      container.appendChild(row);
+    });
+  }
+
+  function addChecklistItemFromInput() {
+    const input = $('checklist-new-input');
+    const text = input.value.trim();
+    if (!text) return;
+    state.editingNote.checklistItems.push({ checked: false, text });
+    input.value = '';
+    renderChecklistEditor();
+    input.focus();
+  }
+
+  function renderNoteTagSuggestions() {
+    const box = $('note-tags-suggestions');
+    box.innerHTML = '';
+    const existing = getAllTags([...state.notes, ...state.todos]);
+    existing.slice(0, 10).forEach((tag) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'tag-suggestion-btn';
+      btn.textContent = `+ #${tag}`;
+      btn.addEventListener('click', () => {
+        const current = parseTags($('note-tags').value);
+        if (!current.some((t) => t.toLowerCase() === tag.toLowerCase())) {
+          current.push(tag);
+          $('note-tags').value = current.join(', ');
+        }
+      });
+      box.appendChild(btn);
+    });
   }
 
   function selectNoteColor(color) {
@@ -706,9 +1030,22 @@
   function saveNoteFromDialog() {
     const id = $('note-id').value;
     const title = $('note-title').value.trim();
-    const content = $('note-content').value.trim();
+
+    if (state.editingNote.isChecklist) {
+      const pending = $('checklist-new-input').value.trim();
+      if (pending) {
+        state.editingNote.checklistItems.push({ checked: false, text: pending });
+        $('checklist-new-input').value = '';
+      }
+    }
+
+    const content = state.editingNote.isChecklist
+      ? serializeChecklist(state.editingNote.checklistItems)
+      : $('note-content').value.trim();
+    const tags = normalizeTags($('note-tags').value);
     const reminderLocal = $('note-reminder').value || '';
     const reminderAt = fromDatetimeLocal(reminderLocal);
+    const recurrence = reminderAt ? $('note-recurrence').value || '' : '';
 
     if (!title && !content) {
       $('note-dialog').close();
@@ -724,10 +1061,12 @@
         const reminderChanged = toDatetimeLocal(note.reminderAt) !== reminderLocal;
         note.title = title;
         note.content = content;
+        note.tags = tags;
         note.color = state.editingNote.color;
         note.pinned = state.editingNote.archived ? false : state.editingNote.pinned;
         note.archived = state.editingNote.archived;
         note.reminderAt = reminderAt;
+        note.recurrence = recurrence;
         if (reminderChanged) note.notified = false;
         note.updatedAt = now;
       }
@@ -738,10 +1077,12 @@
         id: createId('note'),
         title,
         content,
+        tags,
         color: state.editingNote.color,
         pinned: state.editingNote.archived ? false : state.editingNote.pinned,
         archived: state.editingNote.archived,
         reminderAt,
+        recurrence,
         notified: false,
         updatedAt: now,
       };
@@ -761,8 +1102,10 @@
     $('todo-id').value = isEdit ? todo.id : '';
     $('todo-title').value = isEdit ? todo.title || '' : '';
     $('todo-notes').value = isEdit ? todo.notes || '' : '';
+    $('todo-tags').value = isEdit ? todo.tags || '' : state.todosTagFilter || '';
     $('todo-priority').value = isEdit ? todo.priority || 'normal' : 'normal';
     $('todo-reminder').value = isEdit ? toDatetimeLocal(todo.reminderAt) : '';
+    $('todo-recurrence').value = isEdit ? todo.recurrence || '' : '';
     $('todo-delete-btn').classList.toggle('hidden', !isEdit);
 
     $('todo-dialog').showModal();
@@ -775,9 +1118,11 @@
     if (!title) return;
 
     const notes = $('todo-notes').value.trim();
+    const tags = normalizeTags($('todo-tags').value);
     const priority = $('todo-priority').value;
     const reminderLocal = $('todo-reminder').value || '';
     const reminderAt = fromDatetimeLocal(reminderLocal);
+    const recurrence = reminderAt ? $('todo-recurrence').value || '' : '';
     const now = new Date().toISOString();
 
     let todo;
@@ -787,8 +1132,10 @@
         const reminderChanged = toDatetimeLocal(todo.reminderAt) !== reminderLocal;
         todo.title = title;
         todo.notes = notes;
+        todo.tags = tags;
         todo.priority = priority;
         todo.reminderAt = reminderAt;
+        todo.recurrence = recurrence;
         if (reminderChanged) todo.notified = false;
         todo.updatedAt = now;
       }
@@ -799,9 +1146,11 @@
         id: createId('todo'),
         title,
         notes,
+        tags,
         done: false,
         priority,
         reminderAt,
+        recurrence,
         notified: false,
         updatedAt: now,
       };

@@ -83,9 +83,12 @@
     <section id="view-notes" class="view active" aria-label="Mes notes">
       <!-- Quick Add Note Trigger (Google Keep style) -->
       <div class="quick-create-card" id="quick-note-trigger" role="button" tabindex="0" aria-label="Créer une nouvelle note">
-        <span class="quick-placeholder">Prendre une note...</span>
+        <span class="quick-placeholder">Prendre une note ou créer une liste...</span>
         <span class="quick-hint">+ Note</span>
       </div>
+
+      <!-- Tag Filter Bar for Notes -->
+      <div id="notes-tag-bar" class="tag-filter-bar hidden" role="group" aria-label="Filtrer les notes par étiquette"></div>
 
       <div id="pinned-section" class="notes-group hidden">
         <h2 class="section-label">Épinglées</h2>
@@ -132,8 +135,20 @@
             <span>Rappel Telegram :</span>
             <input type="datetime-local" id="quick-todo-reminder" aria-label="Date et heure du rappel" />
           </label>
+          <label class="inline-field">
+            <span>Récurrence :</span>
+            <select id="quick-todo-recurrence" aria-label="Récurrence">
+              <option value="">Une fois</option>
+              <option value="daily">Tous les jours</option>
+              <option value="weekly">Chaque semaine</option>
+              <option value="monthly">Chaque mois</option>
+            </select>
+          </label>
         </div>
       </form>
+
+      <!-- Tag Filter Bar for Todos -->
+      <div id="todos-tag-bar" class="tag-filter-bar hidden" role="group" aria-label="Filtrer les tâches par étiquette"></div>
 
       <!-- Todo Progress & Filters -->
       <div class="todo-toolbar">
@@ -191,7 +206,27 @@
       <div class="modal-body">
         <input type="hidden" id="note-id" />
         <input type="text" id="note-title" class="input-title" placeholder="Titre" maxlength="140" />
+
+        <div class="mode-switch" role="group" aria-label="Type de note">
+          <button type="button" id="mode-text-btn" class="mode-btn active">📝 Texte</button>
+          <button type="button" id="mode-checklist-btn" class="mode-btn">☑️ Liste à cocher</button>
+        </div>
+
         <textarea id="note-content" class="input-textarea" rows="6" placeholder="Écrivez votre note ici..."></textarea>
+
+        <div id="note-checklist-editor" class="checklist-editor hidden">
+          <div id="checklist-items" class="checklist-items"></div>
+          <div class="checklist-add-row">
+            <input type="text" id="checklist-new-input" class="input-field" placeholder="+ Ajouter un élément (Entrée)" />
+            <button type="button" id="checklist-add-btn" class="btn btn-secondary small">Ajouter</button>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="note-tags">🏷️ Étiquettes (séparées par des virgules)</label>
+          <input type="text" id="note-tags" class="input-field" placeholder="ex: Courses, Maison, Perso" />
+          <div id="note-tags-suggestions" class="tag-suggestions"></div>
+        </div>
 
         <div class="field-group">
           <span class="field-label">Couleur</span>
@@ -207,11 +242,22 @@
           </div>
         </div>
 
-        <div class="field-group">
-          <label class="field-label" for="note-reminder">🔔 Rappel Telegram (optionnel)</label>
-          <div class="reminder-row">
-            <input type="datetime-local" id="note-reminder" class="input-field" />
-            <button type="button" id="note-clear-reminder" class="btn btn-ghost small">Effacer</button>
+        <div class="field-row">
+          <div class="field-group">
+            <label class="field-label" for="note-reminder">🔔 Rappel Telegram</label>
+            <div class="reminder-row">
+              <input type="datetime-local" id="note-reminder" class="input-field" />
+              <button type="button" id="note-clear-reminder" class="btn btn-ghost small" title="Effacer le rappel">✕</button>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="note-recurrence">🔁 Récurrence</label>
+            <select id="note-recurrence" class="input-field">
+              <option value="">Une seule fois</option>
+              <option value="daily">Tous les jours</option>
+              <option value="weekly">Toutes les semaines</option>
+              <option value="monthly">Tous les mois</option>
+            </select>
           </div>
         </div>
       </div>
@@ -249,6 +295,11 @@
           <textarea id="todo-notes" class="input-textarea" rows="3" placeholder="Informations supplémentaires..."></textarea>
         </div>
 
+        <div class="field-group">
+          <label class="field-label" for="todo-tags">🏷️ Étiquettes (séparées par des virgules)</label>
+          <input type="text" id="todo-tags" class="input-field" placeholder="ex: Travail, Perso, Urgent" />
+        </div>
+
         <div class="field-row">
           <div class="field-group">
             <label class="field-label" for="todo-priority">Priorité</label>
@@ -259,8 +310,21 @@
             </select>
           </div>
           <div class="field-group">
-            <label class="field-label" for="todo-reminder">🔔 Rappel Telegram</label>
+            <label class="field-label" for="todo-recurrence">🔁 Récurrence</label>
+            <select id="todo-recurrence" class="input-field">
+              <option value="">Une seule fois</option>
+              <option value="daily">Tous les jours</option>
+              <option value="weekly">Toutes les semaines</option>
+              <option value="monthly">Tous les mois</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="todo-reminder">🔔 Rappel Telegram</label>
+          <div class="reminder-row">
             <input type="datetime-local" id="todo-reminder" class="input-field" />
+            <button type="button" id="todo-clear-reminder" class="btn btn-ghost small" title="Effacer le rappel">✕</button>
           </div>
         </div>
       </div>
