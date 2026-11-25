@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=16" />
+  <link rel="stylesheet" href="styles.css?v=17" />
 </head>
 <body>
   <!-- Header -->
@@ -130,15 +130,17 @@
       <!-- Quick Add Todo Form -->
       <form id="quick-todo-form" class="quick-todo-card">
         <div class="quick-todo-top">
-          <input
-            type="text"
-            id="quick-todo-title"
-            class="quick-todo-input"
-            placeholder="Ajouter une tâche..."
-            aria-label="Nouvelle tâche"
-            required
-          />
-          <button type="button" id="quick-todo-voice-btn" class="icon-btn voice-btn" title="Dicter une tâche" aria-label="Dicter une tâche">🎙️</button>
+          <div class="quick-todo-input-row">
+            <input
+              type="text"
+              id="quick-todo-title"
+              class="quick-todo-input"
+              placeholder="Ajouter une tâche..."
+              aria-label="Nouvelle tâche"
+              required
+            />
+            <button type="button" id="quick-todo-voice-btn" class="icon-btn voice-btn" title="Dicter une tâche" aria-label="Dicter une tâche">🎙️</button>
+          </div>
           <button type="submit" class="btn btn-primary">Ajouter</button>
         </div>
         <div class="quick-todo-options">
@@ -410,13 +412,16 @@
 
         <div class="field-group">
           <label class="field-label" for="setting-api-token">Clé secrète API (obligatoire)</label>
-          <input
-            type="password"
-            id="setting-api-token"
-            class="input-field"
-            placeholder="Identique à API_TOKEN dans l'onglet Config"
-            autocomplete="off"
-          />
+          <div class="reminder-row">
+            <input
+              type="password"
+              id="setting-api-token"
+              class="input-field"
+              placeholder="Identique à API_TOKEN dans l'onglet Config"
+              autocomplete="off"
+            />
+            <button type="button" id="btn-toggle-token" class="icon-btn" title="Afficher / masquer la clé" aria-label="Afficher ou masquer la clé API" aria-pressed="false">👁️</button>
+          </div>
         </div>
 
         <div class="settings-actions-grid">
@@ -425,8 +430,11 @@
           <button type="button" id="btn-daily-summary" class="btn btn-secondary">📅 Envoyer résumé du jour</button>
           <button type="button" id="btn-push-local" class="btn btn-secondary">⬆️ Envoyer données locales vers Sheet</button>
           <button type="button" id="btn-export-json" class="btn btn-secondary">💾 Sauvegarde JSON</button>
+          <button type="button" id="btn-import-json" class="btn btn-secondary">📂 Importer JSON</button>
           <button type="button" id="btn-force-update" class="btn btn-secondary">🔄 Forcer la mise à jour</button>
+          <button type="button" id="btn-clear-queue" class="btn btn-danger hidden">🧹 Vider la file en attente</button>
         </div>
+        <input type="file" id="import-json-input" accept=".json,application/json" class="hidden" />
 
         <p class="field-help" id="app-version-label" style="text-align: center;"></p>
 
@@ -452,7 +460,7 @@
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
-  <script src="queue.js?v=16"></script>
-  <script src="app.js?v=16"></script>
+  <script src="queue.js?v=17"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

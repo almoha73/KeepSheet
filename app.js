@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v1.16';
+  const APP_VERSION = 'v1.17';
   const STORAGE_KEY = 'keepsheet_data_v1';
   const SETTINGS_KEY = 'keepsheet_settings_v1';
   const THEME_KEY = 'keepsheet_theme_v1';
@@ -44,6 +44,12 @@
 
   // ---------- INIT ----------
   function init() {
+    // Nettoie ?v=... ajouté par "Forcer la mise à jour" pour garder une URL PWA propre
+    if (window.history && window.history.replaceState && window.location.search.includes('v=')) {
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete('v');
+      window.history.replaceState({}, '', cleanUrl.toString());
+    }
     loadSettings();
     loadLocalData();
     loadQueue();
@@ -143,7 +149,7 @@
     localStorage.setItem(THEME_KEY, theme);
     $('theme-icon').textContent = theme === 'dark' ? '☀️' : '🌙';
     const meta = $('theme-color-meta');
-    if (meta) meta.setAttribute('content', theme === 'dark' ? '#232529' : '#f59e0b');
+    if (meta) meta.setAttribute('content', theme === 'dark' ? '#2a2e37' : '#f59e0b');
   }
 
   // ---------- EVENTS ----------
@@ -202,16 +208,19 @@
       const title = titleInput.value.trim();
       if (!title) return;
 
+      const reminderAt = fromDatetimeLocal($('quick-todo-reminder').value);
+      const rawRecurrence = $('quick-todo-recurrence').value || '';
       const todo = {
         id: createId('todo'),
         title,
         notes: '',
         done: false,
         priority: $('quick-todo-priority').value,
-        reminderAt: fromDatetimeLocal($('quick-todo-reminder').value),
+        reminderAt,
         notified: false,
         tags: state.todosTagFilter || '',
-        recurrence: $('quick-todo-recurrence').value || '',
+        recurrence: reminderAt ? rawRecurrence : '',
+        deletedAt: '',
         updatedAt: new Date().toISOString(),
       };
 
@@ -348,9 +357,7 @@
 
     $('note-telegram-btn').addEventListener('click', () => {
       const title = $('note-title').value.trim() || 'Note sans titre';
-      const content = state.editingNote.isChecklist
-        ? serializeChecklist(state.editingNote.checklistItems)
-        : $('note-content').value.trim();
+      const content = getActiveNoteContent();
       const reminderAt = $('note-reminder').value;
       sendTelegramItem('note', { title, content, reminderAt });
     });
@@ -395,9 +402,14 @@
         return;
       }
 
+      const urlChanged = state.settings.apiUrl !== apiUrl;
       state.settings.apiUrl = apiUrl;
       state.settings.apiToken = apiToken;
       state.syncError = '';
+      if (urlChanged) {
+        state.queue = [];
+        saveQueue();
+      }
       saveSettings();
       updateConnectionBanner();
 
@@ -457,12 +469,43 @@
         todos: state.todos,
       });
       if (res && res.ok) {
+        state.queue = [];
+        state.syncError = '';
+        saveQueue();
+        updateConnectionBanner();
+        updateClearQueueButton();
         setSettingsFeedback('Données locales envoyées vers Google Sheets ⬆️', 'success');
         showToast('Données locales envoyées vers Google Sheets ⬆️');
       }
     });
 
+    $('btn-toggle-token').addEventListener('click', () => {
+      const input = $('setting-api-token');
+      const btn = $('btn-toggle-token');
+      const showing = input.type === 'text';
+      input.type = showing ? 'password' : 'text';
+      btn.setAttribute('aria-pressed', String(!showing));
+    });
+
     $('btn-export-json').addEventListener('click', exportBackupJson);
+
+    $('btn-import-json').addEventListener('click', () => {
+      $('import-json-input').click();
+    });
+
+    $('import-json-input').addEventListener('change', handleImportBackupJson);
+
+    $('btn-clear-queue').addEventListener('click', () => {
+      if (!confirm(`Abandonner les ${state.queue.length} modification(s) bloquée(s) en file d'attente ?`)) {
+        return;
+      }
+      state.queue = [];
+      state.syncError = '';
+      saveQueue();
+      updateConnectionBanner();
+      updateClearQueueButton();
+      setSettingsFeedback('File d’attente vidée 🧹', 'success');
+    });
 
     $('btn-force-update').addEventListener('click', async () => {
       setSettingsFeedback('Mise à jour en cours...', 'info');
@@ -666,13 +709,20 @@
     const base = reminderAt ? new Date(reminderAt) : new Date();
     if (Number.isNaN(base.getTime())) return null;
 
+    const origDay = base.getDate();
     const now = new Date();
     const next = new Date(base.getTime());
+    let monthsAdded = 0;
     const step = () => {
       if (recurrence === 'daily') next.setDate(next.getDate() + 1);
       else if (recurrence === 'weekly') next.setDate(next.getDate() + 7);
-      else if (recurrence === 'monthly') next.setMonth(next.getMonth() + 1);
-      else return false;
+      else if (recurrence === 'monthly') {
+        monthsAdded++;
+        const targetYear = base.getFullYear();
+        const targetMonth = base.getMonth() + monthsAdded;
+        const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+        next.setFullYear(targetYear, targetMonth, Math.min(origDay, lastDay));
+      } else return false;
       return true;
     };
 
@@ -859,21 +909,23 @@
     }
     header.appendChild(headerLeft);
 
-    const pinBtn = document.createElement('button');
-    pinBtn.type = 'button';
-    pinBtn.className = 'icon-btn small';
-    pinBtn.title = note.pinned ? 'Désépingler' : 'Épingler';
-    pinBtn.textContent = note.pinned ? '📌' : '📍';
-    pinBtn.style.opacity = note.pinned ? '1' : '0.45';
-    pinBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      note.pinned = !note.pinned;
-      note.updatedAt = new Date().toISOString();
-      saveLocalData();
-      renderAll();
-      pushAction('saveNote', note);
-    });
-    header.appendChild(pinBtn);
+    if (!note.archived) {
+      const pinBtn = document.createElement('button');
+      pinBtn.type = 'button';
+      pinBtn.className = 'icon-btn small';
+      pinBtn.title = note.pinned ? 'Désépingler' : 'Épingler';
+      pinBtn.textContent = note.pinned ? '📌' : '📍';
+      pinBtn.style.opacity = note.pinned ? '1' : '0.45';
+      pinBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        note.pinned = !note.pinned;
+        note.updatedAt = new Date().toISOString();
+        saveLocalData();
+        renderAll();
+        pushAction('saveNote', note);
+      });
+      header.appendChild(pinBtn);
+    }
     card.appendChild(header);
 
     if (note.content) {
@@ -962,6 +1014,7 @@
 
     card.addEventListener('click', () => openNoteDialog(note));
     card.addEventListener('keydown', (e) => {
+      if (e.target !== card) return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         openNoteDialog(note);
@@ -1256,11 +1309,21 @@
     $('note-title').focus();
   }
 
+  function getActiveNoteContent() {
+    if (state.editingNote.isChecklist) {
+      const pending = $('checklist-new-input').value.trim();
+      if (pending) {
+        state.editingNote.checklistItems.push({ checked: false, text: pending });
+        $('checklist-new-input').value = '';
+      }
+      return serializeChecklist(state.editingNote.checklistItems);
+    }
+    return $('note-content').value.trim();
+  }
+
   function duplicateCurrentNote() {
     const title = $('note-title').value.trim();
-    const content = state.editingNote.isChecklist
-      ? serializeChecklist(state.editingNote.checklistItems)
-      : $('note-content').value.trim();
+    const content = getActiveNoteContent();
     const tags = normalizeTags($('note-tags').value);
     const existingPositions = state.notes
       .map((n) => n.position)
@@ -1471,18 +1534,7 @@
   function saveNoteFromDialog() {
     const id = $('note-id').value;
     const title = $('note-title').value.trim();
-
-    if (state.editingNote.isChecklist) {
-      const pending = $('checklist-new-input').value.trim();
-      if (pending) {
-        state.editingNote.checklistItems.push({ checked: false, text: pending });
-        $('checklist-new-input').value = '';
-      }
-    }
-
-    const content = state.editingNote.isChecklist
-      ? serializeChecklist(state.editingNote.checklistItems)
-      : $('note-content').value.trim();
+    const content = getActiveNoteContent();
     const tags = normalizeTags($('note-tags').value);
     const reminderLocal = $('note-reminder').value || '';
     const reminderAt = fromDatetimeLocal(reminderLocal);
@@ -1610,11 +1662,23 @@
     pushAction('saveTodo', todo);
   }
 
+  function updateClearQueueButton() {
+    const btn = $('btn-clear-queue');
+    if (!btn) return;
+    const n = state.queue.length;
+    btn.classList.toggle('hidden', n === 0);
+    btn.textContent = `🧹 Vider la file en attente (${n})`;
+  }
+
   function openSettingsDialog() {
     $('setting-api-url').value = state.settings.apiUrl;
-    $('setting-api-token').value = state.settings.apiToken;
+    const tokenInput = $('setting-api-token');
+    tokenInput.value = state.settings.apiToken;
+    tokenInput.type = 'password';
+    $('btn-toggle-token').setAttribute('aria-pressed', 'false');
     const versionEl = $('app-version-label');
     if (versionEl) versionEl.textContent = `KeepSheet ${APP_VERSION}`;
+    updateClearQueueButton();
     setSettingsFeedback('', 'hidden');
     const status = $('settings-connection-status');
     if (state.settings.apiUrl) {
@@ -1755,7 +1819,7 @@
     setSyncing(true);
     try {
       // 1. Envoyer d'abord les modifications locales en attente
-      await flushQueue();
+      const flushed = await flushQueue();
 
       // 2. Récupérer l'état du Sheet (POST : le token ne passe jamais dans l'URL)
       const data = await apiRequest('getAll', {});
@@ -1766,12 +1830,14 @@
       applyPendingQueue();
       saveLocalData();
       renderAll();
-      updateConnectionBanner();
       state.lastSyncAt = Date.now();
       if (state.queue.length === 0) state.syncError = '';
       updateConnectionBanner();
-      if (!silent) showToast('Synchronisé avec Google Sheets ✅');
-      return true;
+      if (!silent) {
+        if (flushed) showToast('Synchronisé avec Google Sheets ✅');
+        else showToast(`Synchro partielle : ${state.queue.length} modification(s) encore en attente`, 'error');
+      }
+      return flushed;
     } catch (err) {
       console.error(err);
       const msg = `Erreur de synchro : ${err.message}`;
@@ -1920,6 +1986,54 @@
     a.click();
     URL.revokeObjectURL(url);
     showToast('Sauvegarde JSON téléchargée');
+  }
+
+  async function handleImportBackupJson(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed || !Array.isArray(parsed.notes) || !Array.isArray(parsed.todos)) {
+        throw new Error('Fichier JSON KeepSheet invalide (tableaux notes/todos manquants).');
+      }
+      if (
+        !confirm(
+          `Importer ${parsed.notes.length} note(s) et ${parsed.todos.length} tâche(s) ? Les éléments existants avec le même identifiant seront mis à jour.`
+        )
+      ) {
+        return;
+      }
+
+      const mergeById = (existing, incoming) => {
+        const map = new Map(existing.map((item) => [item.id, item]));
+        incoming.forEach((item) => {
+          if (item && item.id) map.set(item.id, item);
+        });
+        return Array.from(map.values());
+      };
+
+      state.notes = mergeById(state.notes, parsed.notes);
+      state.todos = mergeById(state.todos, parsed.todos);
+      saveLocalData();
+      renderAll();
+
+      if (state.settings.apiUrl && navigator.onLine) {
+        const res = await callApi('syncAll', { notes: parsed.notes, todos: parsed.todos });
+        if (res && res.ok) {
+          setSettingsFeedback('Sauvegarde importée et synchronisée avec Google Sheets ✅', 'success');
+          showToast('Sauvegarde importée ✅');
+          return;
+        }
+      }
+      setSettingsFeedback('Sauvegarde importée localement ✅', 'success');
+      showToast('Sauvegarde importée ✅');
+    } catch (err) {
+      setSettingsFeedback(`Import impossible : ${err.message}`, 'error');
+      showToast(`Import impossible : ${err.message}`, 'error');
+    }
   }
 
   // ---------- TOAST & SERVICE WORKER ----------

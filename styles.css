@@ -748,6 +748,13 @@ html[data-theme="dark"] .chip.tag-chip {
   gap: 10px;
 }
 
+.quick-todo-input-row {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .quick-todo-input {
   flex: 1;
   padding: 10px 14px;

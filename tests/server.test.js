@@ -94,3 +94,42 @@ test('le webhook ignore un autre chat', () => {
   post({ update_id: 1, message: { chat: { id: 7 }, text: '/todo intrus' } }, { tg: ctx.webhookSecret_() });
   assert.strictEqual(api('getAll').todos.length, 0);
 });
+
+test('les formules, téléphones et dates sont protégés à l’écriture', () => {
+  const { api, ctx } = loadBackend();
+  assert.strictEqual(ctx.sanitizeForSheet_('title', '=50€'), "'=50€");
+  assert.strictEqual(ctx.sanitizeForSheet_('title', '+33612345678'), "'+33612345678");
+  assert.strictEqual(ctx.sanitizeForSheet_('title', '0612345678'), "'0612345678");
+  assert.strictEqual(ctx.sanitizeForSheet_('title', '10/11'), "'10/11");
+  assert.strictEqual(ctx.sanitizeForSheet_('content', '- [ ] Pain'), "'- [ ] Pain");
+  api('saveNote', { id: 'n1', title: '=50€', content: '+33612345678', updatedAt: iso(0) });
+  const saved = api('getAll').notes[0];
+  assert.strictEqual(saved.title, '=50€');
+  assert.strictEqual(saved.content, '+33612345678');
+});
+
+test('les messages Telegram > 4096 caractères sont tronqués sans casser le HTML', () => {
+  const { ctx, telegram } = loadBackend();
+  const longMsg = '<b>Titre</b>\n' + 'a'.repeat(5000);
+  ctx.sendTelegramMessage_(longMsg);
+  assert.strictEqual(telegram.length, 1);
+  assert.ok(telegram[0].payload.text.length <= 4096);
+  assert.ok(telegram[0].payload.text.includes('tronqué'));
+});
+
+test('la récurrence mensuelle le 31 janvier passe au 28 février', () => {
+  const { ctx } = loadBackend();
+  const jan31 = new Date('2026-01-31T08:00:00.000Z');
+  const next = ctx.advanceRecurrenceDate_(jan31, 'monthly', new Date('2026-02-01T00:00:00.000Z'));
+  assert.strictEqual(next.getFullYear(), 2026);
+  assert.strictEqual(next.getMonth(), 1); // Février (0-indexed)
+  assert.strictEqual(next.getDate(), 28);
+});
+
+test('une note ajoutée via Telegram passe au-dessus des notes existantes', () => {
+  const { post, api, ctx } = loadBackend();
+  api('saveNote', { id: 'n1', title: 'existante', position: -5, updatedAt: iso(-1000) });
+  post({ update_id: 1, message: { chat: { id: 42 }, text: '/note depuis telegram' } }, { tg: ctx.webhookSecret_() });
+  const tgNote = api('getAll').notes.find((n) => n.title === 'depuis telegram');
+  assert.strictEqual(tgNote.position, -6);
+});

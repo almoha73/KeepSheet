@@ -347,15 +347,21 @@ function processReminders_(ss, sheetName, headers, now, buildFn) {
 
 function advanceRecurrenceDate_(date, recurrence, now) {
   if (!recurrence || !date) return null;
+  const origDay = date.getDate();
   const next = new Date(date.getTime());
   let guard = 0;
+  let monthsAdded = 0;
   while (next <= now && guard < 400) {
     if (recurrence === 'daily') {
       next.setDate(next.getDate() + 1);
     } else if (recurrence === 'weekly') {
       next.setDate(next.getDate() + 7);
     } else if (recurrence === 'monthly') {
-      next.setMonth(next.getMonth() + 1);
+      monthsAdded++;
+      const targetYear = date.getFullYear();
+      const targetMonth = date.getMonth() + monthsAdded;
+      const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+      next.setFullYear(targetYear, targetMonth, Math.min(origDay, lastDay));
     } else {
       return null;
     }
@@ -423,6 +429,18 @@ function sendManualItem_(type, item) {
   }
 }
 
+function truncateTelegramHtml_(htmlText, maxLen) {
+  const str = String(htmlText || '');
+  if (str.length <= maxLen) return str;
+  let cut = str.slice(0, maxLen).replace(/<[^>]*$/, '');
+  ['code', 'i', 'b'].forEach((tag) => {
+    const opens = (cut.match(new RegExp('<' + tag + '>', 'g')) || []).length;
+    const closes = (cut.match(new RegExp('</' + tag + '>', 'g')) || []).length;
+    for (let i = 0; i < opens - closes; i++) cut += '</' + tag + '>';
+  });
+  return cut + '\n… (message tronqué)';
+}
+
 function sendTelegramMessage_(htmlText) {
   const config = getConfig_();
   const botToken = config.TELEGRAM_BOT_TOKEN;
@@ -432,13 +450,14 @@ function sendTelegramMessage_(htmlText) {
     throw new Error('TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID manquant dans l’onglet Config.');
   }
 
+  const safeText = truncateTelegramHtml_(htmlText, 3900);
   const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
   const response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
     payload: JSON.stringify({
       chat_id: chatId,
-      text: htmlText,
+      text: safeText,
       parse_mode: 'HTML',
     }),
     muteHttpExceptions: true,
@@ -578,6 +597,12 @@ function handleTelegramWebhook_(message) {
     content = lines.slice(1).join('\n').trim();
   }
 
+  const existingNotes = readRecords_(SHEET_NOTES, NOTES_HEADERS);
+  const positions = existingNotes
+    .map((n) => n.position)
+    .filter((p) => typeof p === 'number' && !isNaN(p));
+  const topPosition = positions.length ? Math.min.apply(null, positions) - 1 : 0;
+
   const note = {
     id: 'note_' + Utilities.getUuid().slice(0, 8),
     title: title,
@@ -590,7 +615,7 @@ function handleTelegramWebhook_(message) {
     updatedAt: now,
     tags: 'Telegram',
     recurrence: '',
-    position: -1,
+    position: topPosition,
     deletedAt: '',
   };
   upsertRecord_(SHEET_NOTES, NOTES_HEADERS, note);
@@ -627,14 +652,20 @@ function addTombstones_(ids) {
   const clean = (ids || []).filter(Boolean);
   if (clean.length === 0) return;
   const sheet = tombstoneSheet_();
+  const existing =
+    sheet.getLastRow() >= 2
+      ? new Set(sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues().flat())
+      : new Set();
+  const toAdd = clean.filter((id) => !existing.has(id));
+  if (toAdd.length === 0) return;
   const now = new Date().toISOString();
-  const rows = clean.map((id) => [id, now]);
+  const rows = toAdd.map((id) => [id, now]);
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 2).setValues(rows);
 }
 
 function isTombstoned_(id) {
-  const sheet = tombstoneSheet_();
-  if (sheet.getLastRow() < 2) return false;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_DELETED);
+  if (!sheet || sheet.getLastRow() < 2) return false;
   return sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues().flat().indexOf(id) !== -1;
 }
 
@@ -723,16 +754,30 @@ function readRecords_(sheetName, headers) {
     .map((row) => rowToObject_(headers, row));
 }
 
+function sanitizeForSheet_(header, val) {
+  if (val === undefined || val === null) return '';
+  if (header === 'pinned' || header === 'archived' || header === 'done' || header === 'notified') {
+    return Boolean(val);
+  }
+  if (header === 'position') {
+    return typeof val === 'number' && !isNaN(val) ? val : '';
+  }
+  const str = String(val);
+  // Préfixe ' : empêche Google Sheets d'interpréter =, +, -, @ en formule
+  // ou de convertir des numéros/dates (ex: 0612345678, 10/11).
+  if (str.length > 0 && (/^[=+\-@']/.test(str) || /^0\d+$/.test(str) || /^\d{1,2}[\/\-]\d{1,2}/.test(str))) {
+    return "'" + str;
+  }
+  return str;
+}
+
 function upsertRecord_(sheetName, headers, record) {
   if (!record || !record.id) throw new Error('Champ id manquant.');
   if (isTombstoned_(record.id)) return false; // supprimé définitivement ailleurs
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ensureSheet_(ss, sheetName, headers);
 
-  const values = headers.map((h) => {
-    const val = record[h];
-    return val === undefined || val === null ? '' : val;
-  });
+  const values = headers.map((h) => sanitizeForSheet_(h, record[h]));
 
   const lastRow = sheet.getLastRow();
   if (lastRow >= 2) {
@@ -764,7 +809,7 @@ function upsertRecord_(sheetName, headers, record) {
         const incoming = parseDate_(record.reminderAt);
         const stored = parseDate_(current.reminderAt);
         if (incoming && stored && incoming <= new Date() && stored > incoming) {
-          values[reminderIdx] = current.reminderAt;
+          values[reminderIdx] = sanitizeForSheet_('reminderAt', current.reminderAt);
           if (notifiedIdx !== -1) values[notifiedIdx] = current.notified;
         }
       }
@@ -774,7 +819,7 @@ function upsertRecord_(sheetName, headers, record) {
     }
   }
 
-  sheet.appendRow(values);
+  sheet.getRange(lastRow + 1, 1, 1, headers.length).setValues([values]);
   return true;
 }
 

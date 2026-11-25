@@ -1,10 +1,10 @@
-const CACHE_NAME = 'keepsheet-shell-v16';
+const CACHE_NAME = 'keepsheet-shell-v17';
 const ASSETS = [
   './',
   './index.html',
-  './styles.css',
-  './queue.js',
-  './app.js',
+  './styles.css?v=17',
+  './queue.js?v=17',
+  './app.js?v=17',
   './manifest.json',
   './icons/icon.svg',
   './icons/icon-192.png',
@@ -53,6 +53,14 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() =>
+        caches.match(event.request, { ignoreSearch: true }).then((cached) => {
+          if (cached) return cached;
+          if (event.request.mode === 'navigate') {
+            return caches.match('./index.html');
+          }
+          return undefined;
+        })
+      )
   );
 });
