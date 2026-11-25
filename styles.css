@@ -602,6 +602,103 @@ html[data-theme="dark"] .chip {
   margin-top: 2px;
 }
 
+.checklist-tools {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Color Filter Bar */
+.color-filter-bar {
+  max-width: 720px;
+  margin: 0 auto 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.color-filter-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.color-filter-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #111;
+}
+
+.color-swatch.small {
+  width: 24px;
+  height: 24px;
+}
+
+/* Voice Button */
+.voice-btn.recording {
+  background: var(--danger-soft);
+  color: var(--danger);
+  animation: pulse-mic 1s infinite;
+}
+
+@keyframes pulse-mic {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+/* Trash View */
+.trash-toolbar {
+  max-width: 720px;
+  margin: 0 auto 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.trash-list {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trash-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.trash-card-info {
+  flex: 1;
+  min-width: 200px;
+}
+
+.trash-card-title {
+  margin: 0 0 4px;
+  font-size: 0.96rem;
+  font-weight: 600;
+}
+
+.trash-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
 /* Todo View */
 .quick-todo-card {
   max-width: 720px;

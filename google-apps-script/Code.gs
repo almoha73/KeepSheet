@@ -28,6 +28,7 @@ const NOTES_HEADERS = [
   'tags',
   'recurrence',
   'position',
+  'deletedAt',
 ];
 
 const TODOS_HEADERS = [
@@ -41,6 +42,7 @@ const TODOS_HEADERS = [
   'updatedAt',
   'tags',
   'recurrence',
+  'deletedAt',
 ];
 
 /**
@@ -151,6 +153,14 @@ function doPost(e) {
   try {
     const raw = (e && e.postData && e.postData.contents) || '{}';
     const body = JSON.parse(raw);
+
+    // 1. Requête entrante depuis le Webhook Telegram (message envoyé au bot)
+    if (body && body.message && body.message.chat) {
+      handleTelegramWebhook_(body.message);
+      return jsonResponse_({ ok: true });
+    }
+
+    // 2. Requête API depuis la PWA KeepSheet
     verifyToken_(body.token);
 
     const action = body.action;
@@ -175,6 +185,14 @@ function doPost(e) {
 
       case 'deleteTodo':
         deleteRecord_(SHEET_TODOS, payload.id);
+        return jsonResponse_({ ok: true });
+
+      case 'emptyTrash':
+        emptyTrash_();
+        return jsonResponse_({ ok: true });
+
+      case 'setupTelegramWebhook':
+        setupTelegramWebhook_(payload.webAppUrl);
         return jsonResponse_({ ok: true });
 
       case 'syncAll':
@@ -225,7 +243,7 @@ function checkReminders() {
     const rows = notesSheet.getRange(2, 1, notesSheet.getLastRow() - 1, NOTES_HEADERS.length).getValues();
     rows.forEach((row, index) => {
       const note = rowToObject_(NOTES_HEADERS, row);
-      if (note.archived || note.notified || !note.reminderAt) return;
+      if (note.deletedAt || note.archived || note.notified || !note.reminderAt) return;
       const reminderDate = parseDate_(note.reminderAt);
       if (reminderDate && reminderDate <= now) {
         const recLabel = recurrenceLabel_(note.recurrence);
@@ -252,7 +270,7 @@ function checkReminders() {
     const rows = todosSheet.getRange(2, 1, todosSheet.getLastRow() - 1, TODOS_HEADERS.length).getValues();
     rows.forEach((row, index) => {
       const todo = rowToObject_(TODOS_HEADERS, row);
-      if (todo.done || todo.notified || !todo.reminderAt) return;
+      if (todo.deletedAt || todo.done || todo.notified || !todo.reminderAt) return;
       const reminderDate = parseDate_(todo.reminderAt);
       if (reminderDate && reminderDate <= now) {
         const prio = todo.priority === 'high' ? ' 🔥 (Haute priorité)' : '';
@@ -305,8 +323,10 @@ function recurrenceLabel_(recurrence) {
  * Envoie un résumé quotidien sur Telegram avec les tâches actives et urgentes.
  */
 function sendDailySummary() {
-  const todos = readRecords_(SHEET_TODOS, TODOS_HEADERS).filter((t) => !t.done);
-  const notes = readRecords_(SHEET_NOTES, NOTES_HEADERS).filter((n) => !n.archived && n.pinned);
+  const todos = readRecords_(SHEET_TODOS, TODOS_HEADERS).filter((t) => !t.done && !t.deletedAt);
+  const notes = readRecords_(SHEET_NOTES, NOTES_HEADERS).filter(
+    (n) => !n.archived && !n.deletedAt && n.pinned
+  );
 
   const high = todos.filter((t) => t.priority === 'high');
   const others = todos.filter((t) => t.priority !== 'high');
@@ -376,6 +396,150 @@ function sendTelegramMessage_(htmlText) {
   if (code < 200 || code >= 300) {
     throw new Error(`Erreur API Telegram (${code}) : ${response.getContentText()}`);
   }
+}
+
+/**
+ * Configure le Webhook Telegram pour recevoir /note, /todo, /liste, /aide.
+ */
+function setupTelegramWebhook_(webAppUrl) {
+  const config = getConfig_();
+  const botToken = config.TELEGRAM_BOT_TOKEN;
+  if (!botToken) throw new Error('TELEGRAM_BOT_TOKEN manquant dans Config.');
+  if (!webAppUrl || !String(webAppUrl).startsWith('https://script.google.com/macros/s/')) {
+    throw new Error('URL Web App Apps Script invalide.');
+  }
+
+  const url = `https://api.telegram.org/bot${botToken}/setWebhook`;
+  const response = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ url: String(webAppUrl).trim() }),
+    muteHttpExceptions: true,
+  });
+
+  const code = response.getResponseCode();
+  if (code < 200 || code >= 300) {
+    throw new Error(`Erreur setWebhook (${code}) : ${response.getContentText()}`);
+  }
+}
+
+/**
+ * Traite les messages envoyés directement au Bot Telegram.
+ */
+function handleTelegramWebhook_(message) {
+  const config = getConfig_();
+  const allowedChatId = String(config.TELEGRAM_CHAT_ID || '').trim();
+  const incomingChatId = String(message.chat.id);
+  if (!allowedChatId || incomingChatId !== allowedChatId) return;
+
+  const text = String(message.text || '').trim();
+  if (!text) return;
+
+  const now = new Date().toISOString();
+
+  if (text === '/start' || text === '/help' || text === '/aide') {
+    sendTelegramMessage_(
+      '🤖 <b>Commandes KeepSheet :</b>\n\n' +
+        '• <code>/note Acheter du pain</code> → Ajoute une note\n' +
+        '• <code>/note Titre | Contenu</code> → Note avec titre et texte\n' +
+        '• <code>/todo Appeler le dentiste</code> → Ajoute une tâche\n' +
+        '• <code>/todo ! Payer facture</code> → Tâche urgente 🔥\n' +
+        '• <code>/liste</code> → Voir vos tâches à faire\n\n' +
+        '<i>Astuce : un message simple sans commande crée directement une note !</i>'
+    );
+    return;
+  }
+
+  if (text === '/liste' || text === '/todos') {
+    sendDailySummary();
+    return;
+  }
+
+  if (text.toLowerCase().startsWith('/todo')) {
+    let rawTodo = text.replace(/^\/todo\s*/i, '').trim();
+    if (!rawTodo) {
+      sendTelegramMessage_('Utilisation : <code>/todo Votre tâche</code>');
+      return;
+    }
+    let priority = 'normal';
+    if (rawTodo.startsWith('!')) {
+      priority = 'high';
+      rawTodo = rawTodo.replace(/^!\s*/, '').trim();
+    }
+    const todo = {
+      id: 'todo_' + Utilities.getUuid().slice(0, 8),
+      title: rawTodo,
+      notes: 'Ajouté via Telegram',
+      done: false,
+      priority: priority,
+      reminderAt: '',
+      notified: false,
+      updatedAt: now,
+      tags: 'Telegram',
+      recurrence: '',
+      deletedAt: '',
+    };
+    upsertRecord_(SHEET_TODOS, TODOS_HEADERS, todo);
+    sendTelegramMessage_(
+      `☑️ <b>Tâche ajoutée${priority === 'high' ? ' 🔥' : ''} :</b> ${escapeHtml_(rawTodo)}`
+    );
+    return;
+  }
+
+  // Par défaut : /note ou texte libre -> crée une note
+  let rawNote = text.replace(/^\/note\s*/i, '').trim();
+  if (!rawNote) {
+    sendTelegramMessage_('Utilisation : <code>/note Votre note</code>');
+    return;
+  }
+
+  let title = rawNote;
+  let content = '';
+  if (rawNote.indexOf('|') !== -1) {
+    const parts = rawNote.split('|');
+    title = parts[0].trim();
+    content = parts.slice(1).join('|').trim();
+  } else if (rawNote.indexOf('\n') !== -1) {
+    const lines = rawNote.split('\n');
+    title = lines[0].trim();
+    content = lines.slice(1).join('\n').trim();
+  }
+
+  const note = {
+    id: 'note_' + Utilities.getUuid().slice(0, 8),
+    title: title,
+    content: content,
+    color: 'default',
+    pinned: false,
+    archived: false,
+    reminderAt: '',
+    notified: false,
+    updatedAt: now,
+    tags: 'Telegram',
+    recurrence: '',
+    position: -1,
+    deletedAt: '',
+  };
+  upsertRecord_(SHEET_NOTES, NOTES_HEADERS, note);
+  sendTelegramMessage_(`📌 <b>Note ajoutée :</b> ${escapeHtml_(title)}`);
+}
+
+function emptyTrash_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  [
+    [SHEET_NOTES, NOTES_HEADERS],
+    [SHEET_TODOS, TODOS_HEADERS],
+  ].forEach(([sheetName, headers]) => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    const delCol = headers.indexOf('deletedAt');
+    const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i][delCol]) {
+        sheet.deleteRow(i + 2);
+      }
+    }
+  });
 }
 
 // ============================================================================

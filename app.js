@@ -11,6 +11,7 @@
     currentView: 'notes',
     todoFilter: 'all',
     notesTagFilter: '',
+    notesColorFilter: '',
     todosTagFilter: '',
     searchQuery: '',
     settings: {
@@ -275,6 +276,39 @@
       }
     });
 
+    $('checklist-uncheck-all').addEventListener('click', () => {
+      state.editingNote.checklistItems.forEach((item) => {
+        item.checked = false;
+      });
+      renderChecklistEditor();
+      showToast('Toutes les cases ont été décochées');
+    });
+
+    $('note-duplicate-btn').addEventListener('click', duplicateCurrentNote);
+
+    $('notes-color-bar').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-color]');
+      if (!btn) return;
+      const chosen = btn.dataset.color;
+      state.notesColorFilter = state.notesColorFilter === chosen ? '' : chosen;
+      document.querySelectorAll('#notes-color-bar [data-color]').forEach((el) => {
+        el.classList.toggle('active', el.dataset.color === state.notesColorFilter);
+      });
+      renderNotes();
+    });
+
+    $('btn-empty-trash').addEventListener('click', () => {
+      if (!confirm('Vider définitivement toute la corbeille ?')) return;
+      state.notes = state.notes.filter((n) => !n.deletedAt);
+      state.todos = state.todos.filter((t) => !t.deletedAt);
+      saveLocalData();
+      renderAll();
+      showToast('Corbeille vidée 🗑️');
+      pushAction('emptyTrash', {});
+    });
+
+    setupVoiceButtons();
+
     $('todo-clear-reminder').addEventListener('click', () => {
       $('todo-reminder').value = '';
       $('todo-recurrence').value = '';
@@ -288,13 +322,17 @@
     $('note-delete-btn').addEventListener('click', () => {
       const id = $('note-id').value;
       if (!id) return;
-      if (!confirm('Supprimer définitivement cette note ?')) return;
-      state.notes = state.notes.filter((n) => n.id !== id);
+      const note = state.notes.find((n) => n.id === id);
+      if (!note) return;
+      note.deletedAt = new Date().toISOString();
+      note.pinned = false;
+      note.archived = false;
+      note.updatedAt = note.deletedAt;
       saveLocalData();
       $('note-dialog').close();
       renderAll();
-      showToast('Note supprimée');
-      pushAction('deleteNote', { id });
+      showToast('Note déplacée dans la corbeille 🗑️');
+      pushAction('saveNote', note);
     });
 
     $('note-telegram-btn').addEventListener('click', () => {
@@ -315,13 +353,15 @@
     $('todo-delete-btn').addEventListener('click', () => {
       const id = $('todo-id').value;
       if (!id) return;
-      if (!confirm('Supprimer cette tâche ?')) return;
-      state.todos = state.todos.filter((t) => t.id !== id);
+      const todo = state.todos.find((t) => t.id === id);
+      if (!todo) return;
+      todo.deletedAt = new Date().toISOString();
+      todo.updatedAt = todo.deletedAt;
       saveLocalData();
       $('todo-dialog').close();
       renderAll();
-      showToast('Tâche supprimée');
-      pushAction('deleteTodo', { id });
+      showToast('Tâche déplacée dans la corbeille 🗑️');
+      pushAction('saveTodo', todo);
     });
 
     $('todo-telegram-btn').addEventListener('click', () => {
@@ -369,6 +409,21 @@
       if (res && res.ok) {
         setSettingsFeedback('Message test envoyé sur Telegram ✅', 'success');
         showToast('Message test envoyé sur Telegram ✅');
+      }
+    });
+
+    $('btn-setup-webhook').addEventListener('click', async () => {
+      if (!syncSettingsInputsBeforeTest()) return;
+      setSettingsFeedback('Activation des commandes /note et /todo sur Telegram...', 'info');
+      const res = await callApi('setupTelegramWebhook', {
+        webAppUrl: state.settings.apiUrl,
+      });
+      if (res && res.ok) {
+        setSettingsFeedback(
+          'Commandes Bot Telegram activées 🤖 ! Envoyez /aide, /note ou /todo à votre bot.',
+          'success'
+        );
+        showToast('Bot Telegram activé 🤖');
       }
     });
 
@@ -438,17 +493,22 @@
     renderNotes();
     renderTodos();
     renderArchives();
+    renderTrash();
     updateBadges();
   }
 
   function updateBadges() {
-    const activeNotes = state.notes.filter((n) => !n.archived).length;
-    const archivedNotes = state.notes.filter((n) => n.archived).length;
-    const pendingTodos = state.todos.filter((t) => !t.done).length;
+    const activeNotes = state.notes.filter((n) => !n.archived && !n.deletedAt).length;
+    const archivedNotes = state.notes.filter((n) => n.archived && !n.deletedAt).length;
+    const pendingTodos = state.todos.filter((t) => !t.done && !t.deletedAt).length;
+    const trashCount =
+      state.notes.filter((n) => Boolean(n.deletedAt)).length +
+      state.todos.filter((t) => Boolean(t.deletedAt)).length;
 
     $('badge-notes').textContent = String(activeNotes);
     $('badge-todos').textContent = String(pendingTodos);
     $('badge-archives').textContent = String(archivedNotes);
+    $('badge-trash').textContent = String(trashCount);
   }
 
   function matchesSearch(text) {
@@ -572,7 +632,7 @@
   }
 
   function renderNotes() {
-    const nonArchived = state.notes.filter((n) => !n.archived);
+    const nonArchived = state.notes.filter((n) => !n.archived && !n.deletedAt);
     if (state.notesTagFilter && !nonArchived.some((n) => hasTag(n, state.notesTagFilter))) {
       state.notesTagFilter = '';
     }
@@ -585,6 +645,7 @@
       nonArchived.filter(
         (n) =>
           hasTag(n, state.notesTagFilter) &&
+          (!state.notesColorFilter || (n.color || 'default') === state.notesColorFilter) &&
           matchesSearch(`${n.title} ${n.content} ${n.tags || ''}`)
       )
     );
@@ -610,13 +671,93 @@
 
   function renderArchives() {
     const archived = state.notes
-      .filter((n) => n.archived && matchesSearch(`${n.title} ${n.content}`))
+      .filter((n) => n.archived && !n.deletedAt && matchesSearch(`${n.title} ${n.content} ${n.tags || ''}`))
       .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
     const grid = $('archives-grid');
     grid.innerHTML = '';
     archived.forEach((n) => grid.appendChild(createNoteCard(n)));
     $('archives-empty').classList.toggle('hidden', archived.length > 0);
+  }
+
+  function renderTrash() {
+    const deletedNotes = state.notes
+      .filter((n) => Boolean(n.deletedAt) && matchesSearch(`${n.title} ${n.content} ${n.tags || ''}`))
+      .map((n) => ({ type: 'note', item: n }));
+    const deletedTodos = state.todos
+      .filter((t) => Boolean(t.deletedAt) && matchesSearch(`${t.title} ${t.notes} ${t.tags || ''}`))
+      .map((t) => ({ type: 'todo', item: t }));
+
+    const allDeleted = [...deletedNotes, ...deletedTodos].sort(
+      (a, b) => new Date(b.item.deletedAt || 0) - new Date(a.item.deletedAt || 0)
+    );
+
+    const list = $('trash-list');
+    list.innerHTML = '';
+
+    allDeleted.forEach(({ type, item }) => {
+      const card = document.createElement('div');
+      card.className = 'trash-card';
+
+      const info = document.createElement('div');
+      info.className = 'trash-card-info';
+
+      const title = document.createElement('p');
+      title.className = 'trash-card-title';
+      title.textContent = `${type === 'note' ? '📝' : '✅'} ${item.title || '(Sans titre)'}`;
+      info.appendChild(title);
+
+      const preview = type === 'note' ? item.content : item.notes;
+      if (preview) {
+        const sub = document.createElement('p');
+        sub.className = 'field-help';
+        sub.textContent = preview.slice(0, 120);
+        info.appendChild(sub);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'trash-card-actions';
+
+      const restoreBtn = document.createElement('button');
+      restoreBtn.type = 'button';
+      restoreBtn.className = 'btn btn-secondary small';
+      restoreBtn.textContent = '♻️ Restaurer';
+      restoreBtn.addEventListener('click', () => {
+        item.deletedAt = '';
+        item.updatedAt = new Date().toISOString();
+        saveLocalData();
+        renderAll();
+        showToast('Élément restauré ♻️');
+        pushAction(type === 'note' ? 'saveNote' : 'saveTodo', item);
+      });
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn btn-danger small';
+      delBtn.textContent = 'Supprimer';
+      delBtn.addEventListener('click', () => {
+        if (!confirm('Supprimer définitivement cet élément ?')) return;
+        if (type === 'note') {
+          state.notes = state.notes.filter((n) => n.id !== item.id);
+          pushAction('deleteNote', { id: item.id });
+        } else {
+          state.todos = state.todos.filter((t) => t.id !== item.id);
+          pushAction('deleteTodo', { id: item.id });
+        }
+        saveLocalData();
+        renderAll();
+        showToast('Supprimé définitivement');
+      });
+
+      actions.appendChild(restoreBtn);
+      actions.appendChild(delBtn);
+      card.appendChild(info);
+      card.appendChild(actions);
+      list.appendChild(card);
+    });
+
+    $('btn-empty-trash').classList.toggle('hidden', allDeleted.length === 0);
+    $('trash-empty').classList.toggle('hidden', allDeleted.length > 0);
   }
 
   function createNoteCard(note) {
@@ -838,28 +979,43 @@
 
   function renderTodos() {
     const priorityRank = { high: 0, normal: 1, low: 2 };
+    const visibleTodos = state.todos.filter((t) => !t.deletedAt);
 
-    if (state.todosTagFilter && !state.todos.some((t) => hasTag(t, state.todosTagFilter))) {
+    if (state.todosTagFilter && !visibleTodos.some((t) => hasTag(t, state.todosTagFilter))) {
       state.todosTagFilter = '';
     }
-    renderTagFilterBar('todos-tag-bar', state.todos, state.todosTagFilter, (tag) => {
+    renderTagFilterBar('todos-tag-bar', visibleTodos, state.todosTagFilter, (tag) => {
       state.todosTagFilter = tag;
       renderTodos();
     });
 
-    const total = state.todos.length;
-    const doneCount = state.todos.filter((t) => t.done).length;
+    const total = visibleTodos.length;
+    const doneCount = visibleTodos.filter((t) => t.done).length;
     const pct = total ? Math.round((doneCount / total) * 100) : 0;
     $('todo-progress-text').textContent = `${doneCount} / ${total} terminées`;
     $('todo-progress-fill').style.width = `${pct}%`;
 
-    const filtered = state.todos
+    const now = new Date();
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const endOfWeek = new Date(endOfToday.getTime() + 6 * 24 * 60 * 60 * 1000);
+
+    const filtered = visibleTodos
       .filter((t) => {
         if (!hasTag(t, state.todosTagFilter)) return false;
         if (!matchesSearch(`${t.title} ${t.notes} ${t.tags || ''}`)) return false;
         if (state.todoFilter === 'active') return !t.done;
         if (state.todoFilter === 'done') return t.done;
         if (state.todoFilter === 'high') return !t.done && t.priority === 'high';
+        if (state.todoFilter === 'today') {
+          if (t.done || !t.reminderAt) return false;
+          const d = new Date(t.reminderAt);
+          return !Number.isNaN(d.getTime()) && d <= endOfToday;
+        }
+        if (state.todoFilter === 'week') {
+          if (t.done || !t.reminderAt) return false;
+          const d = new Date(t.reminderAt);
+          return !Number.isNaN(d.getTime()) && d <= endOfWeek;
+        }
         return true;
       })
       .sort((a, b) => {
@@ -1008,9 +1164,111 @@
     $('note-pin-btn').setAttribute('aria-pressed', String(state.editingNote.pinned));
     $('note-archive-btn').setAttribute('aria-pressed', String(state.editingNote.archived));
     $('note-delete-btn').classList.toggle('hidden', !isEdit);
+    $('note-duplicate-btn').classList.toggle('hidden', !isEdit);
 
     $('note-dialog').showModal();
     $('note-title').focus();
+  }
+
+  function duplicateCurrentNote() {
+    const title = $('note-title').value.trim();
+    const content = state.editingNote.isChecklist
+      ? serializeChecklist(state.editingNote.checklistItems)
+      : $('note-content').value.trim();
+    const tags = normalizeTags($('note-tags').value);
+    const existingPositions = state.notes
+      .map((n) => n.position)
+      .filter((p) => typeof p === 'number' && !Number.isNaN(p));
+    const topPosition = existingPositions.length ? Math.min(...existingPositions) - 1 : 0;
+
+    const copy = {
+      id: createId('note'),
+      title: title ? `${title} (copie)` : 'Note (copie)',
+      content,
+      tags,
+      color: state.editingNote.color,
+      pinned: false,
+      archived: false,
+      reminderAt: '',
+      recurrence: '',
+      notified: false,
+      position: topPosition,
+      deletedAt: '',
+      updatedAt: new Date().toISOString(),
+    };
+
+    state.notes.unshift(copy);
+    saveLocalData();
+    $('note-dialog').close();
+    renderAll();
+    showToast('Note dupliquée 📋');
+    pushAction('saveNote', copy);
+  }
+
+  // ---------- VOICE DICTATION (Android & Chrome) ----------
+  function setupVoiceButtons() {
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const voiceBtns = document.querySelectorAll('.voice-btn');
+    if (!SpeechRec) {
+      voiceBtns.forEach((btn) => btn.classList.add('hidden'));
+      return;
+    }
+
+    $('quick-todo-voice-btn').addEventListener('click', () => {
+      startVoiceDictation($('quick-todo-voice-btn'), (transcript) => {
+        const input = $('quick-todo-title');
+        input.value = input.value ? `${input.value} ${transcript}` : transcript;
+        input.focus();
+      });
+    });
+
+    $('note-voice-btn').addEventListener('click', () => {
+      startVoiceDictation($('note-voice-btn'), (transcript) => {
+        if (state.editingNote.isChecklist) {
+          state.editingNote.checklistItems.push({ checked: false, text: transcript });
+          renderChecklistEditor();
+        } else {
+          const area = $('note-content');
+          area.value = area.value ? `${area.value}\n${transcript}` : transcript;
+          area.focus();
+        }
+      });
+    });
+  }
+
+  function startVoiceDictation(btn, onResult) {
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRec) return;
+
+    const recognition = new SpeechRec();
+    recognition.lang = 'fr-FR';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    btn.classList.add('recording');
+    showToast('🎙️ Parlez maintenant...');
+
+    recognition.onresult = (event) => {
+      const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+      if (transcript) {
+        onResult(transcript);
+        showToast('Dictée ajoutée ✅');
+      }
+    };
+
+    recognition.onerror = (event) => {
+      showToast(`Dictée impossible (${event.error})`, 'error');
+    };
+
+    recognition.onend = () => {
+      btn.classList.remove('recording');
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      btn.classList.remove('recording');
+    }
   }
 
   function setNoteEditorMode(toChecklist) {

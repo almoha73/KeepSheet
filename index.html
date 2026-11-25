@@ -75,6 +75,11 @@
       <span>Archives</span>
       <span class="nav-badge" id="badge-archives">0</span>
     </button>
+    <button type="button" class="nav-tab" data-view="trash">
+      <span class="nav-icon" aria-hidden="true">🗑️</span>
+      <span>Corbeille</span>
+      <span class="nav-badge" id="badge-trash">0</span>
+    </button>
   </nav>
 
   <!-- Main Content -->
@@ -89,6 +94,19 @@
 
       <!-- Tag Filter Bar for Notes -->
       <div id="notes-tag-bar" class="tag-filter-bar hidden" role="group" aria-label="Filtrer les notes par étiquette"></div>
+
+      <!-- Color Filter Bar for Notes -->
+      <div id="notes-color-bar" class="color-filter-bar" role="group" aria-label="Filtrer les notes par couleur">
+        <button type="button" class="color-filter-btn active" data-color="" title="Toutes les couleurs" aria-label="Toutes les couleurs">Toutes</button>
+        <button type="button" class="color-swatch small" data-color="default" title="Par défaut" aria-label="Couleur par défaut"></button>
+        <button type="button" class="color-swatch small" data-color="coral" title="Corail" aria-label="Corail"></button>
+        <button type="button" class="color-swatch small" data-color="peach" title="Pêche" aria-label="Pêche"></button>
+        <button type="button" class="color-swatch small" data-color="sand" title="Sable" aria-label="Sable"></button>
+        <button type="button" class="color-swatch small" data-color="mint" title="Menthe" aria-label="Menthe"></button>
+        <button type="button" class="color-swatch small" data-color="sage" title="Sauge" aria-label="Sauge"></button>
+        <button type="button" class="color-swatch small" data-color="fog" title="Brume" aria-label="Brume"></button>
+        <button type="button" class="color-swatch small" data-color="lavender" title="Lavande" aria-label="Lavande"></button>
+      </div>
 
       <div id="pinned-section" class="notes-group hidden">
         <h2 class="section-label">Épinglées</h2>
@@ -120,6 +138,7 @@
             aria-label="Nouvelle tâche"
             required
           />
+          <button type="button" id="quick-todo-voice-btn" class="icon-btn voice-btn" title="Dicter une tâche" aria-label="Dicter une tâche">🎙️</button>
           <button type="submit" class="btn btn-primary">Ajouter</button>
         </div>
         <div class="quick-todo-options">
@@ -154,6 +173,8 @@
       <div class="todo-toolbar">
         <div class="filter-pills" role="group" aria-label="Filtrer les tâches">
           <button type="button" class="pill active" data-filter="all">Toutes</button>
+          <button type="button" class="pill" data-filter="today">Aujourd’hui</button>
+          <button type="button" class="pill" data-filter="week">Cette semaine</button>
           <button type="button" class="pill" data-filter="active">À faire</button>
           <button type="button" class="pill" data-filter="high">Urgentes</button>
           <button type="button" class="pill" data-filter="done">Terminées</button>
@@ -184,6 +205,20 @@
         <p class="empty-sub">Les notes que vous archivez apparaîtront ici.</p>
       </div>
     </section>
+
+    <!-- TRASH VIEW -->
+    <section id="view-trash" class="view hidden" aria-label="Corbeille">
+      <div class="trash-toolbar">
+        <p class="field-help">Les éléments supprimés peuvent être restaurés ou effacés définitivement.</p>
+        <button type="button" id="btn-empty-trash" class="btn btn-danger small hidden">🗑️ Vider la corbeille</button>
+      </div>
+      <div id="trash-list" class="trash-list"></div>
+      <div id="trash-empty" class="empty-state hidden">
+        <div class="empty-icon" aria-hidden="true">🗑️</div>
+        <p class="empty-title">La corbeille est vide</p>
+        <p class="empty-sub">Les notes et tâches que vous supprimez apparaîtront ici avant suppression définitive.</p>
+      </div>
+    </section>
   </main>
 
   <!-- Floating Action Button (Mobile & Quick Access) -->
@@ -197,6 +232,8 @@
       <div class="modal-header">
         <h2 id="note-dialog-title">Nouvelle note</h2>
         <div class="modal-header-actions">
+          <button type="button" id="note-voice-btn" class="icon-btn voice-btn" title="Dicter à la voix" aria-label="Dicter à la voix">🎙️</button>
+          <button type="button" id="note-duplicate-btn" class="icon-btn hidden" title="Dupliquer la note" aria-label="Dupliquer la note">📋</button>
           <button type="button" id="note-pin-btn" class="icon-btn" title="Épingler" aria-label="Épingler la note" aria-pressed="false">📌</button>
           <button type="button" id="note-archive-btn" class="icon-btn" title="Archiver" aria-label="Archiver la note" aria-pressed="false">📦</button>
           <button type="button" class="icon-btn close-dialog" data-close="note-dialog" aria-label="Fermer">✕</button>
@@ -219,6 +256,9 @@
           <div class="checklist-add-row">
             <input type="text" id="checklist-new-input" class="input-field" placeholder="+ Ajouter un élément (Entrée)" />
             <button type="button" id="checklist-add-btn" class="btn btn-secondary small">Ajouter</button>
+          </div>
+          <div class="checklist-tools">
+            <button type="button" id="checklist-uncheck-all" class="btn btn-ghost small">↺ Décocher tout</button>
           </div>
         </div>
 
@@ -381,6 +421,7 @@
 
         <div class="settings-actions-grid">
           <button type="button" id="btn-test-telegram" class="btn btn-secondary">✈️ Tester Telegram</button>
+          <button type="button" id="btn-setup-webhook" class="btn btn-secondary">🤖 Activer commandes /note &amp; /todo</button>
           <button type="button" id="btn-daily-summary" class="btn btn-secondary">📅 Envoyer résumé du jour</button>
           <button type="button" id="btn-push-local" class="btn btn-secondary">⬆️ Envoyer données locales vers Sheet</button>
           <button type="button" id="btn-export-json" class="btn btn-secondary">💾 Sauvegarde JSON</button>
