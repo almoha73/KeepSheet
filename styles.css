@@ -439,7 +439,9 @@ html[data-theme="dark"] .note-card[data-color]:not([data-color="default"]) {
 }
 
 html[data-theme="dark"] .chip {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(15, 17, 22, 0.58);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.22);
 }
 
 .chip.overdue {
@@ -447,8 +449,14 @@ html[data-theme="dark"] .chip {
   color: var(--danger);
 }
 
+html[data-theme="dark"] .chip.overdue {
+  background: #991b1b;
+  color: #ffffff;
+  border: 1px solid #fca5a5;
+}
+
 .chip.notified {
-  opacity: 0.75;
+  opacity: 0.9;
 }
 
 .chip.priority-high {
@@ -456,13 +464,25 @@ html[data-theme="dark"] .chip {
   color: var(--danger);
 }
 
+html[data-theme="dark"] .chip.priority-high {
+  background: #991b1b;
+  color: #ffffff;
+  border: 1px solid #fca5a5;
+}
+
 .chip.priority-low {
-  opacity: 0.7;
+  opacity: 0.75;
 }
 
 .chip.tag-chip {
   background: var(--accent-soft);
   color: var(--text);
+}
+
+html[data-theme="dark"] .chip.tag-chip {
+  background: rgba(15, 17, 22, 0.52);
+  color: #fde68a;
+  border: 1px solid rgba(253, 230, 138, 0.35);
 }
 
 /* Tag Filter Bar */

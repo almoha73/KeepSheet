@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v1.11';
+  const APP_VERSION = 'v1.12';
   const STORAGE_KEY = 'keepsheet_data_v1';
   const SETTINGS_KEY = 'keepsheet_settings_v1';
   const THEME_KEY = 'keepsheet_theme_v1';
