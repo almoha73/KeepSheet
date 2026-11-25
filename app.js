@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v1.12';
+  const APP_VERSION = 'v1.13';
   const STORAGE_KEY = 'keepsheet_data_v1';
   const SETTINGS_KEY = 'keepsheet_settings_v1';
   const THEME_KEY = 'keepsheet_theme_v1';
@@ -467,7 +467,9 @@
       } catch (err) {
         console.warn(err);
       }
-      window.location.reload();
+      const url = new URL(window.location.href);
+      url.searchParams.set('v', String(Date.now()));
+      window.location.replace(url.toString());
     });
 
     // PWA Install Prompt (Android Chrome)
