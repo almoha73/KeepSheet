@@ -622,6 +622,30 @@
     return '';
   }
 
+  function computeNextRecurrence(reminderAt, recurrence) {
+    if (!recurrence) return null;
+    const base = reminderAt ? new Date(reminderAt) : new Date();
+    if (Number.isNaN(base.getTime())) return null;
+
+    const now = new Date();
+    const next = new Date(base.getTime());
+    const step = () => {
+      if (recurrence === 'daily') next.setDate(next.getDate() + 1);
+      else if (recurrence === 'weekly') next.setDate(next.getDate() + 7);
+      else if (recurrence === 'monthly') next.setMonth(next.getMonth() + 1);
+      else return false;
+      return true;
+    };
+
+    if (!step()) return null;
+    let guard = 0;
+    while (next <= now && guard < 400) {
+      step();
+      guard++;
+    }
+    return next;
+  }
+
   function sortNotesList(list) {
     return list.sort((a, b) => {
       const pa = typeof a.position === 'number' && !Number.isNaN(a.position) ? a.position : Number.MAX_SAFE_INTEGER;
@@ -1044,6 +1068,27 @@
       checkbox.checked = Boolean(todo.done);
       checkbox.setAttribute('aria-label', `Marquer "${todo.title}" comme terminée`);
       checkbox.addEventListener('change', () => {
+        if (checkbox.checked && todo.recurrence) {
+          const nextDate = computeNextRecurrence(todo.reminderAt, todo.recurrence);
+          if (nextDate) {
+            todo.done = false;
+            todo.reminderAt = nextDate.toISOString();
+            todo.notified = false;
+            todo.updatedAt = new Date().toISOString();
+            saveLocalData();
+            renderTodos();
+            updateBadges();
+            const label = nextDate.toLocaleString('fr-FR', {
+              day: '2-digit',
+              month: 'short',
+              hour: '2-digit',
+              minute: '2-digit',
+            });
+            showToast(`✅ Fait ! Reprogrammé au ${label} 🔁`);
+            pushAction('saveTodo', todo);
+            return;
+          }
+        }
         todo.done = checkbox.checked;
         todo.updatedAt = new Date().toISOString();
         saveLocalData();
