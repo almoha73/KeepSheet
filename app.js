@@ -309,35 +309,64 @@
     // Settings dialog controls
     $('settings-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      state.settings.apiUrl = $('setting-api-url').value.trim();
-      state.settings.apiToken = $('setting-api-token').value.trim();
+      const apiUrl = $('setting-api-url').value.trim();
+      const apiToken = $('setting-api-token').value.trim();
+
+      const urlError = validateApiUrl(apiUrl);
+      if (urlError) {
+        setSettingsFeedback(urlError, 'error');
+        return;
+      }
+
+      state.settings.apiUrl = apiUrl;
+      state.settings.apiToken = apiToken;
       saveSettings();
-      $('settings-dialog').close();
       updateConnectionBanner();
 
       if (state.settings.apiUrl) {
-        await syncFromSheet({ silent: false });
+        setSettingsFeedback('Synchronisation en cours...', 'info');
+        const ok = await syncFromSheet({ silent: false });
+        if (ok) {
+          setSettingsFeedback('Connexion Google Sheets réussie ✅', 'success');
+          $('settings-dialog').close();
+        }
       } else {
+        $('settings-dialog').close();
         showToast('Mode local activé');
       }
     });
 
     $('btn-test-telegram').addEventListener('click', async () => {
+      if (!syncSettingsInputsBeforeTest()) return;
+      setSettingsFeedback('Envoi du message test Telegram...', 'info');
       const res = await callApi('sendTelegramTest', {});
-      if (res && res.ok) showToast('Message test envoyé sur Telegram ✅');
+      if (res && res.ok) {
+        setSettingsFeedback('Message test envoyé sur Telegram ✅', 'success');
+        showToast('Message test envoyé sur Telegram ✅');
+      }
     });
 
     $('btn-daily-summary').addEventListener('click', async () => {
+      if (!syncSettingsInputsBeforeTest()) return;
+      setSettingsFeedback('Envoi du résumé du jour...', 'info');
       const res = await callApi('sendDailySummary', {});
-      if (res && res.ok) showToast('Résumé du jour envoyé sur Telegram 📅');
+      if (res && res.ok) {
+        setSettingsFeedback('Résumé du jour envoyé sur Telegram 📅', 'success');
+        showToast('Résumé du jour envoyé sur Telegram 📅');
+      }
     });
 
     $('btn-push-local').addEventListener('click', async () => {
+      if (!syncSettingsInputsBeforeTest()) return;
+      setSettingsFeedback('Envoi des données locales vers Google Sheets...', 'info');
       const res = await callApi('syncAll', {
         notes: state.notes,
         todos: state.todos,
       });
-      if (res && res.ok) showToast('Données locales envoyées vers Google Sheets ⬆️');
+      if (res && res.ok) {
+        setSettingsFeedback('Données locales envoyées vers Google Sheets ⬆️', 'success');
+        showToast('Données locales envoyées vers Google Sheets ⬆️');
+      }
     });
 
     $('btn-export-json').addEventListener('click', exportBackupJson);
@@ -787,6 +816,7 @@
   function openSettingsDialog() {
     $('setting-api-url').value = state.settings.apiUrl;
     $('setting-api-token').value = state.settings.apiToken;
+    setSettingsFeedback('', 'hidden');
     const status = $('settings-connection-status');
     if (state.settings.apiUrl) {
       status.textContent = '✅ Connecté à Google Sheets (Apps Script configuré)';
@@ -796,6 +826,43 @@
       status.classList.remove('connected');
     }
     $('settings-dialog').showModal();
+  }
+
+  function setSettingsFeedback(message, type = 'info') {
+    const box = $('settings-feedback');
+    if (!box) return;
+    if (!message || type === 'hidden') {
+      box.textContent = '';
+      box.className = 'settings-feedback hidden';
+      return;
+    }
+    box.textContent = message;
+    box.className = `settings-feedback ${type}`;
+  }
+
+  function validateApiUrl(url) {
+    if (!url) return '';
+    if (url.includes('docs.google.com/spreadsheets')) {
+      return 'Mauvais lien : vous avez collé l’URL du tableur Google Sheets. Il faut coller l’URL de l’Application Web Apps Script (https://script.google.com/macros/s/.../exec).';
+    }
+    if (!url.startsWith('https://script.google.com/macros/s/') || !url.endsWith('/exec')) {
+      return 'URL invalide : elle doit commencer par https://script.google.com/macros/s/ et se terminer par /exec.';
+    }
+    return '';
+  }
+
+  function syncSettingsInputsBeforeTest() {
+    const apiUrl = $('setting-api-url').value.trim();
+    const apiToken = $('setting-api-token').value.trim();
+    const urlError = validateApiUrl(apiUrl);
+    if (urlError) {
+      setSettingsFeedback(urlError, 'error');
+      return false;
+    }
+    state.settings.apiUrl = apiUrl;
+    state.settings.apiToken = apiToken;
+    saveSettings();
+    return true;
   }
 
   function toDatetimeLocal(value) {
@@ -830,14 +897,28 @@
     if (icon) icon.classList.toggle('spinning', active);
   }
 
+  async function parseJsonResponse(res) {
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      if (text.trim().startsWith('<')) {
+        throw new Error(
+          'Google a renvoyé une page HTML au lieu de JSON. Vérifiez dans Apps Script que « Qui a accès » est bien sur « Tout le monde » et que l’URL finit par /exec.'
+        );
+      }
+      throw new Error(`Réponse invalide (${res.status}) : ${text.slice(0, 120)}`);
+    }
+  }
+
   async function syncFromSheet({ silent = false } = {}) {
     if (!state.settings.apiUrl) {
-      if (!silent) showToast('Configurez d’abord l’URL Google Apps Script dans ⚙️');
-      return;
+      if (!silent) showToast('Configurez d’abord l’URL Google Apps Script dans ⚙️', 'error');
+      return false;
     }
     if (!navigator.onLine) {
-      if (!silent) showToast('Impossible de synchroniser hors ligne');
-      return;
+      if (!silent) showToast('Impossible de synchroniser hors ligne', 'error');
+      return false;
     }
 
     setSyncing(true);
@@ -848,8 +929,8 @@
         url.searchParams.set('token', state.settings.apiToken);
       }
 
-      const res = await fetch(url.toString(), { method: 'GET' });
-      const data = await res.json();
+      const res = await fetch(url.toString(), { method: 'GET', redirect: 'follow' });
+      const data = await parseJsonResponse(res);
       if (!data.ok) throw new Error(data.error || 'Erreur API Google Sheets');
 
       state.notes = Array.isArray(data.notes) ? data.notes : [];
@@ -858,9 +939,13 @@
       renderAll();
       updateConnectionBanner();
       if (!silent) showToast('Synchronisé avec Google Sheets ✅');
+      return true;
     } catch (err) {
       console.error(err);
-      if (!silent) showToast(`Erreur de synchro : ${err.message}`);
+      const msg = `Erreur de synchro : ${err.message}`;
+      setSettingsFeedback(msg, 'error');
+      if (!silent) showToast(msg, 'error');
+      return false;
     } finally {
       setSyncing(false);
     }
@@ -868,11 +953,13 @@
 
   async function callApi(action, payload) {
     if (!state.settings.apiUrl) {
-      showToast('Configurez l’URL Google Apps Script dans ⚙️ d’abord');
+      const msg = 'Configurez l’URL Google Apps Script dans ⚙️ d’abord';
+      setSettingsFeedback(msg, 'error');
+      showToast(msg, 'error');
       return null;
     }
     if (!navigator.onLine) {
-      showToast('Hors ligne — réessayez avec une connexion');
+      showToast('Hors ligne — réessayez avec une connexion', 'error');
       return null;
     }
 
@@ -881,6 +968,7 @@
       // text/plain avoids CORS preflight with Google Apps Script Web Apps
       const res = await fetch(state.settings.apiUrl, {
         method: 'POST',
+        redirect: 'follow',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({
           action,
@@ -888,12 +976,14 @@
           payload,
         }),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!data.ok) throw new Error(data.error || 'Erreur serveur');
       return data;
     } catch (err) {
       console.error(err);
-      showToast(`Erreur : ${err.message}`);
+      const msg = `Erreur : ${err.message}`;
+      setSettingsFeedback(msg, 'error');
+      showToast(msg, 'error');
       return null;
     } finally {
       setSyncing(false);
@@ -925,13 +1015,13 @@
   }
 
   // ---------- TOAST & SERVICE WORKER ----------
-  function showToast(message) {
+  function showToast(message, type = 'info') {
     const container = $('toast-container');
     const toast = document.createElement('div');
-    toast.className = 'toast';
+    toast.className = `toast${type === 'error' ? ' error' : ''}`;
     toast.textContent = message;
     container.appendChild(toast);
-    setTimeout(() => toast.remove(), 2800);
+    setTimeout(() => toast.remove(), type === 'error' ? 6000 : 2800);
   }
 
   function registerServiceWorker() {
