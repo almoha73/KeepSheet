@@ -9,6 +9,9 @@
  * 5. Cliquez sur "📌 KeepSheet > 1. Initialiser les onglets", remplissez l'onglet Config,
  *    puis cliquez sur "📌 KeepSheet > 2. Activer les rappels automatiques".
  * 6. Déployer > Nouveau déploiement > Application Web (Accès : Tout le monde).
+ *
+ * Mise à jour du code : Déployer > Gérer les déploiements > ✏️ > Version : « Nouvelle version »
+ * (l'URL /exec reste la même).
  */
 
 const SHEET_NOTES = 'Notes';
@@ -78,20 +81,29 @@ function setupProject() {
     configSheet.getRange(2, 1, 4, 3).setValues([
       ['TELEGRAM_BOT_TOKEN', '', 'Token donné par @BotFather sur Telegram'],
       ['TELEGRAM_CHAT_ID', '', 'Votre Chat ID Telegram (ex: via @userinfobot)'],
-      ['API_TOKEN', '', 'Mot de passe optionnel partagé avec la PWA'],
+      ['API_TOKEN', '', 'Mot de passe OBLIGATOIRE partagé avec la PWA (généré automatiquement)'],
       ['DAILY_SUMMARY_HOUR', '8', 'Heure du résumé quotidien (0 à 23, ex: 8 pour 8h)'],
     ]);
     configSheet.autoResizeColumns(1, 3);
   }
 
+  let apiToken = getConfig_().API_TOKEN;
+  if (!apiToken) {
+    apiToken = Utilities.getUuid().replace(/-/g, '').slice(0, 20);
+    setConfigValue_('API_TOKEN', apiToken, 'Mot de passe OBLIGATOIRE partagé avec la PWA');
+  }
+
   SpreadsheetApp.getUi().alert(
-    'Onglets KeepSheet prêts !\n\nRemplissez TELEGRAM_BOT_TOKEN et TELEGRAM_CHAT_ID dans l’onglet "Config", puis activez les rappels via le menu 📌 KeepSheet.'
+    'Onglets KeepSheet prêts !\n\n' +
+      'Votre API_TOKEN (à coller dans ⚙️ de l’application) :\n' +
+      apiToken +
+      '\n\nRemplissez TELEGRAM_BOT_TOKEN et TELEGRAM_CHAT_ID dans l’onglet "Config", puis activez les rappels via le menu 📌 KeepSheet.'
   );
 }
 
 /**
  * Installe les déclencheurs automatiques :
- * - checkReminders toutes les 5 minutes
+ * - checkReminders toutes les minutes
  * - sendDailySummary tous les jours à l'heure choisie dans Config
  */
 function setupTriggers() {
@@ -129,34 +141,28 @@ function testTelegramFromMenu() {
 // API WEB (appelée par la PWA)
 // ============================================================================
 
-function doGet(e) {
-  try {
-    const params = (e && e.parameter) || {};
-    verifyToken_(params.token);
-
-    const action = params.action || 'getAll';
-    if (action === 'getAll') {
-      return jsonResponse_({
-        ok: true,
-        notes: readRecords_(SHEET_NOTES, NOTES_HEADERS),
-        todos: readRecords_(SHEET_TODOS, TODOS_HEADERS),
-      });
-    }
-
-    return jsonResponse_({ ok: false, error: 'Action GET inconnue : ' + action });
-  } catch (err) {
-    return jsonResponse_({ ok: false, error: err.message });
-  }
+function doGet() {
+  // Les données ne sont plus servies en GET (le token apparaîtrait dans l'URL).
+  return jsonResponse_({
+    ok: false,
+    error:
+      'Version de l’application obsolète : ouvrez ⚙️ puis « Forcer la mise à jour ».',
+  });
 }
 
 function doPost(e) {
   try {
+    const params = (e && e.parameter) || {};
     const raw = (e && e.postData && e.postData.contents) || '{}';
     const body = JSON.parse(raw);
 
     // 1. Requête entrante depuis le Webhook Telegram (message envoyé au bot)
-    if (body && body.message && body.message.chat) {
-      handleTelegramWebhook_(body.message);
+    if (body && body.update_id !== undefined) {
+      // Le secret dans l'URL du webhook prouve que l'appel vient bien de Telegram
+      if (!body.message || !body.message.chat || params.tg !== webhookSecret_()) {
+        return jsonResponse_({ ok: true });
+      }
+      withLock_(() => handleTelegramWebhook_(body.message));
       return jsonResponse_({ ok: true });
     }
 
@@ -166,63 +172,86 @@ function doPost(e) {
     const action = body.action;
     const payload = body.payload || {};
 
-    switch (action) {
-      case 'saveNote':
-        upsertRecord_(SHEET_NOTES, NOTES_HEADERS, payload);
-        return jsonResponse_({ ok: true });
+    return withLock_(() => {
+      switch (action) {
+        case 'getAll':
+          return jsonResponse_({
+            ok: true,
+            notes: readRecords_(SHEET_NOTES, NOTES_HEADERS),
+            todos: readRecords_(SHEET_TODOS, TODOS_HEADERS),
+          });
 
-      case 'deleteNote':
-        deleteRecord_(SHEET_NOTES, payload.id);
-        return jsonResponse_({ ok: true });
+        case 'saveNote':
+          upsertRecord_(SHEET_NOTES, NOTES_HEADERS, payload);
+          return jsonResponse_({ ok: true });
 
-      case 'reorderNotes':
-        reorderNotes_(payload.order || []);
-        return jsonResponse_({ ok: true });
+        case 'deleteNote':
+          deleteRecord_(SHEET_NOTES, payload.id);
+          return jsonResponse_({ ok: true });
 
-      case 'saveTodo':
-        upsertRecord_(SHEET_TODOS, TODOS_HEADERS, payload);
-        return jsonResponse_({ ok: true });
+        case 'reorderNotes':
+          reorderNotes_(payload.order || []);
+          return jsonResponse_({ ok: true });
 
-      case 'deleteTodo':
-        deleteRecord_(SHEET_TODOS, payload.id);
-        return jsonResponse_({ ok: true });
+        case 'saveTodo':
+          upsertRecord_(SHEET_TODOS, TODOS_HEADERS, payload);
+          return jsonResponse_({ ok: true });
 
-      case 'emptyTrash':
-        emptyTrash_();
-        return jsonResponse_({ ok: true });
+        case 'deleteTodo':
+          deleteRecord_(SHEET_TODOS, payload.id);
+          return jsonResponse_({ ok: true });
 
-      case 'setupTelegramWebhook':
-        setupTelegramWebhook_(payload.webAppUrl);
-        return jsonResponse_({ ok: true });
+        case 'emptyTrash':
+          emptyTrash_();
+          return jsonResponse_({ ok: true });
 
-      case 'syncAll':
-        if (Array.isArray(payload.notes)) {
-          payload.notes.forEach((n) => upsertRecord_(SHEET_NOTES, NOTES_HEADERS, n));
-        }
-        if (Array.isArray(payload.todos)) {
-          payload.todos.forEach((t) => upsertRecord_(SHEET_TODOS, TODOS_HEADERS, t));
-        }
-        return jsonResponse_({ ok: true });
+        case 'setupTelegramWebhook':
+          setupTelegramWebhook_(payload.webAppUrl);
+          return jsonResponse_({ ok: true });
 
-      case 'sendTelegramTest':
-        sendTelegramMessage_(
-          '✅ <b>Test KeepSheet réussi !</b>\nVotre application PWA communique bien avec Google Sheets et Telegram.'
-        );
-        return jsonResponse_({ ok: true });
+        case 'syncAll':
+          if (Array.isArray(payload.notes)) {
+            payload.notes.forEach((n) => upsertRecord_(SHEET_NOTES, NOTES_HEADERS, n));
+          }
+          if (Array.isArray(payload.todos)) {
+            payload.todos.forEach((t) => upsertRecord_(SHEET_TODOS, TODOS_HEADERS, t));
+          }
+          return jsonResponse_({ ok: true });
 
-      case 'sendTelegramItem':
-        sendManualItem_(payload.type, payload.item || {});
-        return jsonResponse_({ ok: true });
+        case 'sendTelegramTest':
+          sendTelegramMessage_(
+            '✅ <b>Test KeepSheet réussi !</b>\nVotre application PWA communique bien avec Google Sheets et Telegram.'
+          );
+          return jsonResponse_({ ok: true });
 
-      case 'sendDailySummary':
-        sendDailySummary();
-        return jsonResponse_({ ok: true });
+        case 'sendTelegramItem':
+          sendManualItem_(payload.type, payload.item || {});
+          return jsonResponse_({ ok: true });
 
-      default:
-        return jsonResponse_({ ok: false, error: 'Action POST inconnue : ' + action });
-    }
+        case 'sendDailySummary':
+          sendDailySummary();
+          return jsonResponse_({ ok: true });
+
+        default:
+          return jsonResponse_({ ok: false, error: 'Action POST inconnue : ' + action });
+      }
+    });
   } catch (err) {
     return jsonResponse_({ ok: false, error: err.message });
+  }
+}
+
+/**
+ * Exécute fn en exclusivité : empêche l'API et les rappels automatiques
+ * de modifier le Sheet en même temps (lignes décalées, doublons…).
+ */
+function withLock_(fn) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -231,66 +260,84 @@ function doPost(e) {
 // ============================================================================
 
 /**
- * Vérifie toutes les 5 minutes les notes et tâches dont reminderAt <= maintenant.
+ * Vérifie toutes les minutes les notes et tâches dont reminderAt <= maintenant.
+ *
+ * - Note récurrente : le rappel est reprogrammé à l'occurrence suivante.
+ * - Tâche récurrente : elle est marquée « notifiée » et reste en retard jusqu'à
+ *   ce que vous la cochiez dans l'application, qui la reprogramme alors
+ *   (sinon l'occurrence serait avancée deux fois).
  */
 function checkReminders() {
-  const now = new Date();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return; // une autre exécution est en cours : on réessaiera
+  try {
+    const config = getConfig_();
+    if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) return;
 
-  // 1. Notes
-  const notesSheet = ensureSheet_(ss, SHEET_NOTES, NOTES_HEADERS);
-  if (notesSheet && notesSheet.getLastRow() > 1) {
-    const rows = notesSheet.getRange(2, 1, notesSheet.getLastRow() - 1, NOTES_HEADERS.length).getValues();
-    rows.forEach((row, index) => {
-      const note = rowToObject_(NOTES_HEADERS, row);
-      if (note.deletedAt || note.archived || note.notified || !note.reminderAt) return;
-      const reminderDate = parseDate_(note.reminderAt);
-      if (reminderDate && reminderDate <= now) {
-        const recLabel = recurrenceLabel_(note.recurrence);
-        const msg =
+    const now = new Date();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    processReminders_(ss, SHEET_NOTES, NOTES_HEADERS, now, (note) => {
+      if (note.deletedAt || note.archived) return null;
+      const recLabel = recurrenceLabel_(note.recurrence);
+      return {
+        message:
           `🔔 <b>Rappel Note${recLabel ? ' (' + recLabel + ')' : ''}</b>\n` +
           `📌 <b>${escapeHtml_(note.title || 'Note sans titre')}</b>` +
-          (note.content ? `\n\n${escapeHtml_(note.content)}` : '');
-        sendTelegramMessage_(msg);
-
-        const nextDate = advanceRecurrenceDate_(reminderDate, note.recurrence, now);
-        if (nextDate) {
-          notesSheet.getRange(index + 2, NOTES_HEADERS.indexOf('reminderAt') + 1).setValue(nextDate.toISOString());
-          notesSheet.getRange(index + 2, NOTES_HEADERS.indexOf('notified') + 1).setValue(false);
-        } else {
-          notesSheet.getRange(index + 2, NOTES_HEADERS.indexOf('notified') + 1).setValue(true);
-        }
-      }
+          (note.content ? `\n\n${escapeHtml_(note.content)}` : ''),
+        advance: true,
+      };
     });
-  }
 
-  // 2. Todos
-  const todosSheet = ensureSheet_(ss, SHEET_TODOS, TODOS_HEADERS);
-  if (todosSheet && todosSheet.getLastRow() > 1) {
-    const rows = todosSheet.getRange(2, 1, todosSheet.getLastRow() - 1, TODOS_HEADERS.length).getValues();
-    rows.forEach((row, index) => {
-      const todo = rowToObject_(TODOS_HEADERS, row);
-      if (todo.deletedAt || todo.done || todo.notified || !todo.reminderAt) return;
-      const reminderDate = parseDate_(todo.reminderAt);
-      if (reminderDate && reminderDate <= now) {
-        const prio = todo.priority === 'high' ? ' 🔥 (Haute priorité)' : '';
-        const recLabel = recurrenceLabel_(todo.recurrence);
-        const msg =
+    processReminders_(ss, SHEET_TODOS, TODOS_HEADERS, now, (todo) => {
+      if (todo.deletedAt || todo.done) return null;
+      const prio = todo.priority === 'high' ? ' 🔥 (Haute priorité)' : '';
+      const recLabel = recurrenceLabel_(todo.recurrence);
+      return {
+        message:
           `⏰ <b>Rappel Tâche${prio}${recLabel ? ' (' + recLabel + ')' : ''}</b>\n` +
           `☑️ <b>${escapeHtml_(todo.title || 'Tâche')}</b>` +
-          (todo.notes ? `\n\n${escapeHtml_(todo.notes)}` : '');
-        sendTelegramMessage_(msg);
-
-        const nextDate = advanceRecurrenceDate_(reminderDate, todo.recurrence, now);
-        if (nextDate) {
-          todosSheet.getRange(index + 2, TODOS_HEADERS.indexOf('reminderAt') + 1).setValue(nextDate.toISOString());
-          todosSheet.getRange(index + 2, TODOS_HEADERS.indexOf('notified') + 1).setValue(false);
-        } else {
-          todosSheet.getRange(index + 2, TODOS_HEADERS.indexOf('notified') + 1).setValue(true);
-        }
-      }
+          (todo.notes ? `\n\n${escapeHtml_(todo.notes)}` : ''),
+        advance: false,
+      };
     });
+  } finally {
+    lock.releaseLock();
   }
+}
+
+function processReminders_(ss, sheetName, headers, now, buildFn) {
+  const sheet = ensureSheet_(ss, sheetName, headers);
+  if (!sheet || sheet.getLastRow() < 2) return;
+
+  const reminderCol = headers.indexOf('reminderAt') + 1;
+  const notifiedCol = headers.indexOf('notified') + 1;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+
+  rows.forEach((row, index) => {
+    const item = rowToObject_(headers, row);
+    if (!item.id || item.notified || !item.reminderAt) return;
+    const reminderDate = parseDate_(item.reminderAt);
+    if (!reminderDate || reminderDate > now) return;
+
+    const built = buildFn(item);
+    if (!built) return;
+
+    try {
+      sendTelegramMessage_(built.message);
+    } catch (err) {
+      console.error(err);
+      return; // non marqué : nouvel essai à la prochaine exécution
+    }
+
+    const nextDate = built.advance ? advanceRecurrenceDate_(reminderDate, item.recurrence, now) : null;
+    if (nextDate) {
+      sheet.getRange(index + 2, reminderCol).setValue(nextDate.toISOString());
+      sheet.getRange(index + 2, notifiedCol).setValue(false);
+    } else {
+      sheet.getRange(index + 2, notifiedCol).setValue(true);
+    }
+  });
 }
 
 function advanceRecurrenceDate_(date, recurrence, now) {
@@ -413,7 +460,10 @@ function setupTelegramWebhook_(webAppUrl) {
   const response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ url: String(webAppUrl).trim() }),
+    payload: JSON.stringify({
+      url: String(webAppUrl).trim() + '?tg=' + webhookSecret_(),
+      allowed_updates: ['message'],
+    }),
     muteHttpExceptions: true,
   });
 
@@ -421,6 +471,24 @@ function setupTelegramWebhook_(webAppUrl) {
   if (code < 200 || code >= 300) {
     throw new Error(`Erreur setWebhook (${code}) : ${response.getContentText()}`);
   }
+}
+
+/**
+ * Secret dérivé de API_TOKEN, ajouté à l'URL du webhook Telegram.
+ * (Apps Script ne donne pas accès aux en-têtes HTTP, d'où le paramètre d'URL.)
+ */
+function webhookSecret_() {
+  const token = getConfig_().API_TOKEN;
+  if (!token) throw new Error('API_TOKEN manquant dans l’onglet Config.');
+  const bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    'keepsheet-telegram:' + token,
+    Utilities.Charset.UTF_8
+  );
+  return bytes
+    .map((b) => ((b + 256) % 256).toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 32);
 }
 
 /**
@@ -577,9 +645,30 @@ function getConfig_() {
   return config;
 }
 
+function setConfigValue_(key, value, description) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_CONFIG);
+  if (!sheet) return;
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    const keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat();
+    const idx = keys.map((k) => String(k).trim()).indexOf(key);
+    if (idx !== -1) {
+      sheet.getRange(idx + 2, 2).setValue(value);
+      return;
+    }
+  }
+  sheet.appendRow([key, value, description || '']);
+}
+
 function verifyToken_(providedToken) {
   const config = getConfig_();
-  if (config.API_TOKEN && String(providedToken || '').trim() !== config.API_TOKEN) {
+  if (!config.API_TOKEN) {
+    throw new Error(
+      'API_TOKEN non défini : dans Google Sheets, lancez « 📌 KeepSheet → 1. Initialiser les onglets » pour en générer un.'
+    );
+  }
+  if (String(providedToken || '').trim() !== config.API_TOKEN) {
     throw new Error('Clé secrète API invalide.');
   }
 }
@@ -610,12 +699,38 @@ function upsertRecord_(sheetName, headers, record) {
     const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat();
     const existingIndex = ids.indexOf(record.id);
     if (existingIndex !== -1) {
-      sheet.getRange(existingIndex + 2, 1, 1, headers.length).setValues([values]);
-      return;
+      const rowNum = existingIndex + 2;
+      const current = rowToObject_(
+        headers,
+        sheet.getRange(rowNum, 1, 1, headers.length).getValues()[0]
+      );
+
+      // La version la plus récente gagne : on ignore une écriture plus ancienne
+      // (ex. modification hors ligne d'un autre appareil envoyée en retard).
+      const currentTime = parseDate_(current.updatedAt);
+      const incomingTime = parseDate_(record.updatedAt);
+      if (currentTime && incomingTime && incomingTime < currentTime) return false;
+
+      // Ne pas renvoyer un rappel déjà envoyé si la date n'a pas changé
+      const notifiedIdx = headers.indexOf('notified');
+      if (notifiedIdx !== -1 && current.notified && sameInstant_(current.reminderAt, record.reminderAt)) {
+        values[notifiedIdx] = true;
+      }
+
+      sheet.getRange(rowNum, 1, 1, headers.length).setValues([values]);
+      return true;
     }
   }
 
   sheet.appendRow(values);
+  return true;
+}
+
+function sameInstant_(a, b) {
+  const da = parseDate_(a);
+  const db = parseDate_(b);
+  if (!da || !db) return !a && !b;
+  return da.getTime() === db.getTime();
 }
 
 function deleteRecord_(sheetName, id) {

@@ -1,10 +1,11 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v1.13';
+  const APP_VERSION = 'v1.14';
   const STORAGE_KEY = 'keepsheet_data_v1';
   const SETTINGS_KEY = 'keepsheet_settings_v1';
   const THEME_KEY = 'keepsheet_theme_v1';
+  const QUEUE_KEY = 'keepsheet_queue_v1';
 
   const state = {
     notes: [],
@@ -28,6 +29,10 @@
     },
     deferredInstallPrompt: null,
     isSyncing: false,
+    syncCount: 0,
+    // Actions en attente d'envoi vers Google Sheets (persistées dans localStorage)
+    queue: [],
+    flushPromise: null,
   };
 
   // DOM helpers
@@ -37,6 +42,7 @@
   function init() {
     loadSettings();
     loadLocalData();
+    loadQueue();
     initTheme();
     bindEvents();
     registerServiceWorker();
@@ -997,7 +1003,9 @@
       if (!targetId || targetId === sourceNote.id) return;
 
       const sameGroup = sortNotesList(
-        state.notes.filter((n) => !n.archived && Boolean(n.pinned) === Boolean(sourceNote.pinned))
+        state.notes.filter(
+          (n) => !n.archived && !n.deletedAt && Boolean(n.pinned) === Boolean(sourceNote.pinned)
+        )
       );
       const fromIdx = sameGroup.findIndex((n) => n.id === sourceNote.id);
       const toIdx = sameGroup.findIndex((n) => n.id === targetId);
@@ -1661,8 +1669,12 @@
   // ---------- GOOGLE SHEETS & TELEGRAM API ----------
   function updateConnectionBanner() {
     const banner = $('status-banner');
+    const pending = state.queue.length;
+    const pendingText = pending
+      ? ` ${pending} modification(s) en attente d’envoi vers Google Sheets.`
+      : '';
     if (!navigator.onLine) {
-      banner.textContent = '📡 Hors ligne — vos modifications sont enregistrées localement.';
+      banner.textContent = `📡 Hors ligne — vos modifications sont enregistrées localement.${pendingText}`;
       banner.classList.remove('hidden');
       return;
     }
@@ -1672,13 +1684,19 @@
       banner.classList.remove('hidden');
       return;
     }
+    if (pending) {
+      banner.textContent = `⏳${pendingText}`;
+      banner.classList.remove('hidden');
+      return;
+    }
     banner.classList.add('hidden');
   }
 
   function setSyncing(active) {
-    state.isSyncing = active;
+    state.syncCount = Math.max(0, state.syncCount + (active ? 1 : -1));
+    state.isSyncing = state.syncCount > 0;
     const icon = document.querySelector('#btn-sync .sync-icon');
-    if (icon) icon.classList.toggle('spinning', active);
+    if (icon) icon.classList.toggle('spinning', state.isSyncing);
   }
 
   async function parseJsonResponse(res) {
@@ -1707,23 +1725,16 @@
 
     setSyncing(true);
     try {
-      const url = new URL(state.settings.apiUrl);
-      url.searchParams.set('action', 'getAll');
-      url.searchParams.set('_t', String(Date.now()));
-      if (state.settings.apiToken) {
-        url.searchParams.set('token', state.settings.apiToken);
-      }
+      // 1. Envoyer d'abord les modifications locales en attente
+      await flushQueue();
 
-      const res = await fetch(url.toString(), {
-        method: 'GET',
-        redirect: 'follow',
-        cache: 'no-store',
-      });
-      const data = await parseJsonResponse(res);
-      if (!data.ok) throw new Error(data.error || 'Erreur API Google Sheets');
+      // 2. Récupérer l'état du Sheet (POST : le token ne passe jamais dans l'URL)
+      const data = await apiRequest('getAll', {});
 
       state.notes = Array.isArray(data.notes) ? data.notes : [];
       state.todos = Array.isArray(data.todos) ? data.todos : [];
+      // 3. Ré-appliquer ce qui n'a pas encore pu être envoyé pour ne rien perdre
+      applyPendingQueue();
       saveLocalData();
       renderAll();
       updateConnectionBanner();
@@ -1754,20 +1765,7 @@
 
     setSyncing(true);
     try {
-      // text/plain avoids CORS preflight with Google Apps Script Web Apps
-      const res = await fetch(state.settings.apiUrl, {
-        method: 'POST',
-        redirect: 'follow',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action,
-          token: state.settings.apiToken,
-          payload,
-        }),
-      });
-      const data = await parseJsonResponse(res);
-      if (!data.ok) throw new Error(data.error || 'Erreur serveur');
-      return data;
+      return await apiRequest(action, payload);
     } catch (err) {
       console.error(err);
       const msg = `Erreur : ${err.message}`;
@@ -1779,9 +1777,130 @@
     }
   }
 
+  async function apiRequest(action, payload) {
+    // text/plain avoids CORS preflight with Google Apps Script Web Apps
+    const res = await fetch(state.settings.apiUrl, {
+      method: 'POST',
+      redirect: 'follow',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action,
+        token: state.settings.apiToken,
+        payload,
+      }),
+    });
+    const data = await parseJsonResponse(res);
+    if (!data.ok) throw new Error(data.error || 'Erreur serveur');
+    return data;
+  }
+
+  // ---------- FILE D'ATTENTE HORS LIGNE ----------
+  function loadQueue() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+      state.queue = Array.isArray(saved) ? saved.filter((q) => q && q.action) : [];
+    } catch {
+      state.queue = [];
+    }
+  }
+
+  function saveQueue() {
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(state.queue));
+  }
+
+  function enqueueAction(action, payload) {
+    const snapshot = JSON.parse(JSON.stringify(payload || {}));
+    const isNoteItem = action === 'saveNote' || action === 'deleteNote';
+    const isTodoItem = action === 'saveTodo' || action === 'deleteTodo';
+
+    if (isNoteItem || isTodoItem) {
+      // Seule la dernière version d'un élément compte : on remplace l'ancienne
+      const related = isNoteItem ? ['saveNote', 'deleteNote'] : ['saveTodo', 'deleteTodo'];
+      state.queue = state.queue.filter(
+        (q) => !(related.includes(q.action) && q.payload && q.payload.id === snapshot.id)
+      );
+    } else if (action === 'reorderNotes') {
+      const previous = state.queue.find((q) => q.action === 'reorderNotes');
+      if (previous) {
+        const merged = new Map();
+        (previous.payload.order || []).forEach((o) => merged.set(o.id, o.position));
+        (snapshot.order || []).forEach((o) => merged.set(o.id, o.position));
+        snapshot.order = Array.from(merged, ([id, position]) => ({ id, position }));
+        state.queue = state.queue.filter((q) => q !== previous);
+      }
+    }
+
+    state.queue.push({ action, payload: snapshot });
+    saveQueue();
+    updateConnectionBanner();
+  }
+
+  // Envoie les actions en attente une par une, dans l'ordre. S'arrête à la
+  // première erreur (réseau ou serveur) en gardant le reste pour plus tard.
+  function flushQueue() {
+    if (state.flushPromise) return state.flushPromise;
+    if (!state.settings.apiUrl || !navigator.onLine || state.queue.length === 0) {
+      updateConnectionBanner();
+      return Promise.resolve(state.queue.length === 0);
+    }
+
+    state.flushPromise = (async () => {
+      setSyncing(true);
+      try {
+        while (state.queue.length > 0) {
+          const item = state.queue[0];
+          await apiRequest(item.action, item.payload);
+          state.queue = state.queue.filter((q) => q !== item);
+          saveQueue();
+        }
+        return true;
+      } catch (err) {
+        console.error(err);
+        showToast(
+          `Synchro en attente (${state.queue.length}) : ${err.message}`,
+          'error'
+        );
+        return false;
+      } finally {
+        state.flushPromise = null;
+        setSyncing(false);
+        updateConnectionBanner();
+      }
+    })();
+    return state.flushPromise;
+  }
+
+  // Ré-applique les actions non envoyées sur les données reçues du Sheet
+  function applyPendingQueue() {
+    state.queue.forEach(({ action, payload }) => {
+      if (action === 'saveNote' || action === 'saveTodo') {
+        const key = action === 'saveNote' ? 'notes' : 'todos';
+        const copy = JSON.parse(JSON.stringify(payload));
+        const idx = state[key].findIndex((x) => x.id === copy.id);
+        if (idx === -1) state[key].unshift(copy);
+        else state[key][idx] = copy;
+      } else if (action === 'deleteNote') {
+        state.notes = state.notes.filter((n) => n.id !== payload.id);
+      } else if (action === 'deleteTodo') {
+        state.todos = state.todos.filter((t) => t.id !== payload.id);
+      } else if (action === 'emptyTrash') {
+        state.notes = state.notes.filter((n) => !n.deletedAt);
+        state.todos = state.todos.filter((t) => !t.deletedAt);
+      } else if (action === 'reorderNotes') {
+        (payload.order || []).forEach(({ id, position }) => {
+          const note = state.notes.find((n) => n.id === id);
+          if (note) note.position = position;
+        });
+      }
+    });
+  }
+
   function pushAction(action, payload) {
-    if (!state.settings.apiUrl || !navigator.onLine) return;
-    callApi(action, payload);
+    // Mode local pur : rien à synchroniser
+    if (!state.settings.apiUrl) return;
+    enqueueAction(action, payload);
+    flushQueue();
   }
 
   async function sendTelegramItem(type, item) {
