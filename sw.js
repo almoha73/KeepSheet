@@ -1,4 +1,4 @@
-const CACHE_NAME = 'keepsheet-shell-v9';
+const CACHE_NAME = 'keepsheet-shell-v10';
 const ASSETS = [
   './',
   './index.html',

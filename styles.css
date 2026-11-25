@@ -31,31 +31,31 @@
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #18191c;
-  --surface: #232529;
-  --surface-hover: #2d3036;
-  --text: #e8eaed;
-  --text-muted: #9aa0a6;
-  --border: #3c4043;
+  --bg: #1f2228;
+  --surface: #2a2e37;
+  --surface-hover: #353b47;
+  --text: #f3f4f6;
+  --text-muted: #b0b7c3;
+  --border: #434a59;
   --accent: #fbbf24;
   --accent-hover: #f59e0b;
-  --accent-soft: rgba(251, 191, 36, 0.16);
+  --accent-soft: rgba(251, 191, 36, 0.2);
   --danger: #f87171;
-  --danger-soft: rgba(248, 113, 113, 0.16);
+  --danger-soft: rgba(248, 113, 113, 0.2);
   --success: #4ade80;
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 14px 36px rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 14px 36px rgba(0, 0, 0, 0.55);
 
-  /* Note palette (Dark - Google Keep inspired) */
-  --note-default: #232529;
-  --note-coral: #77172e;
-  --note-peach: #692b17;
-  --note-sand: #7c4a03;
-  --note-mint: #264d3b;
-  --note-sage: #0c625d;
-  --note-fog: #256377;
-  --note-lavender: #472e5b;
+  /* Note palette (Dark - luminous & high contrast) */
+  --note-default: #2d323d;
+  --note-coral: #a33b50;
+  --note-peach: #ab5730;
+  --note-sand: #9e7320;
+  --note-mint: #2f7357;
+  --note-sage: #217d75;
+  --note-fog: #2c7194;
+  --note-lavender: #6e4b91;
 }
 
 *,
@@ -380,6 +380,10 @@ body {
 .note-card[data-color="sage"] { background: var(--note-sage); border-color: transparent; }
 .note-card[data-color="fog"] { background: var(--note-fog); border-color: transparent; }
 .note-card[data-color="lavender"] { background: var(--note-lavender); border-color: transparent; }
+
+html[data-theme="dark"] .note-card[data-color]:not([data-color="default"]) {
+  border-color: rgba(255, 255, 255, 0.14);
+}
 
 .note-card-header {
   display: flex;
