@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v1.14';
+  const APP_VERSION = 'v1.15';
   const STORAGE_KEY = 'keepsheet_data_v1';
   const SETTINGS_KEY = 'keepsheet_settings_v1';
   const THEME_KEY = 'keepsheet_theme_v1';
@@ -33,6 +33,8 @@
     // Actions en attente d'envoi vers Google Sheets (persistées dans localStorage)
     queue: [],
     flushPromise: null,
+    syncPromise: null,
+    lastSyncAt: 0,
   };
 
   // DOM helpers
@@ -498,6 +500,14 @@
       if (state.settings.apiUrl) syncFromSheet({ silent: true });
     });
     window.addEventListener('offline', updateConnectionBanner);
+
+    // Une PWA rouverte depuis l'arrière-plan ne redémarre pas : on resynchronise
+    // dès qu'elle revient au premier plan pour voir les changements des autres appareils.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || !state.settings.apiUrl) return;
+      if (Date.now() - state.lastSyncAt < 15000) return;
+      syncFromSheet({ silent: true });
+    });
   }
 
   // ---------- NAVIGATION ----------
@@ -1713,7 +1723,16 @@
     }
   }
 
-  async function syncFromSheet({ silent = false } = {}) {
+  function syncFromSheet(options = {}) {
+    // Évite deux synchronisations simultanées
+    if (state.syncPromise) return state.syncPromise;
+    state.syncPromise = doSyncFromSheet(options).finally(() => {
+      state.syncPromise = null;
+    });
+    return state.syncPromise;
+  }
+
+  async function doSyncFromSheet({ silent = false } = {}) {
     if (!state.settings.apiUrl) {
       if (!silent) showToast('Configurez d’abord l’URL Google Apps Script dans ⚙️', 'error');
       return false;
@@ -1738,6 +1757,7 @@
       saveLocalData();
       renderAll();
       updateConnectionBanner();
+      state.lastSyncAt = Date.now();
       if (!silent) showToast('Synchronisé avec Google Sheets ✅');
       return true;
     } catch (err) {
