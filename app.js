@@ -925,11 +925,16 @@
     try {
       const url = new URL(state.settings.apiUrl);
       url.searchParams.set('action', 'getAll');
+      url.searchParams.set('_t', String(Date.now()));
       if (state.settings.apiToken) {
         url.searchParams.set('token', state.settings.apiToken);
       }
 
-      const res = await fetch(url.toString(), { method: 'GET', redirect: 'follow' });
+      const res = await fetch(url.toString(), {
+        method: 'GET',
+        redirect: 'follow',
+        cache: 'no-store',
+      });
       const data = await parseJsonResponse(res);
       if (!data.ok) throw new Error(data.error || 'Erreur API Google Sheets');
 
