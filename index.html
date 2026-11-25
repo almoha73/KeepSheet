@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f59e0b" id="theme-color-meta" />
+  <meta name="description" content="KeepSheet — Notes façon Google Keep, Todo List, synchronisation Google Sheets et rappels Telegram." />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>KeepSheet — Notes &amp; Todo</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="brand" aria-label="KeepSheet">
+        <span class="brand-icon" aria-hidden="true">📌</span>
+        <span class="brand-name">KeepSheet</span>
+      </div>
+    </div>
+
+    <div class="search-wrapper">
+      <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+      </svg>
+      <input
+        type="search"
+        id="search-input"
+        class="search-input"
+        placeholder="Rechercher notes ou tâches..."
+        aria-label="Rechercher notes ou tâches"
+        autocomplete="off"
+      />
+      <button type="button" id="search-clear" class="icon-btn small hidden" aria-label="Effacer la recherche">✕</button>
+    </div>
+
+    <div class="header-actions">
+      <button type="button" id="btn-sync" class="icon-btn" title="Synchroniser avec Google Sheets" aria-label="Synchroniser">
+        <svg class="sync-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+        </svg>
+      </button>
+      <button type="button" id="btn-theme" class="icon-btn" title="Changer de thème" aria-label="Changer de thème">
+        <span id="theme-icon" aria-hidden="true">🌙</span>
+      </button>
+      <button type="button" id="btn-settings" class="icon-btn" title="Paramètres Google Sheets & Telegram" aria-label="Paramètres">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Sync & Install Status Bar -->
+  <div id="status-banner" class="status-banner hidden" role="status" aria-live="polite"></div>
+
+  <!-- Desktop Navigation Tabs -->
+  <nav class="nav-tabs" aria-label="Navigation principale">
+    <button type="button" class="nav-tab active" data-view="notes" aria-current="page">
+      <span class="nav-icon" aria-hidden="true">📝</span>
+      <span>Notes</span>
+      <span class="nav-badge" id="badge-notes">0</span>
+    </button>
+    <button type="button" class="nav-tab" data-view="todos">
+      <span class="nav-icon" aria-hidden="true">✅</span>
+      <span>Todo List</span>
+      <span class="nav-badge" id="badge-todos">0</span>
+    </button>
+    <button type="button" class="nav-tab" data-view="archives">
+      <span class="nav-icon" aria-hidden="true">📦</span>
+      <span>Archives</span>
+      <span class="nav-badge" id="badge-archives">0</span>
+    </button>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="app-main">
+    <!-- NOTES VIEW -->
+    <section id="view-notes" class="view active" aria-label="Mes notes">
+      <!-- Quick Add Note Trigger (Google Keep style) -->
+      <div class="quick-create-card" id="quick-note-trigger" role="button" tabindex="0" aria-label="Créer une nouvelle note">
+        <span class="quick-placeholder">Prendre une note...</span>
+        <span class="quick-hint">+ Note</span>
+      </div>
+
+      <div id="pinned-section" class="notes-group hidden">
+        <h2 class="section-label">Épinglées</h2>
+        <div id="pinned-notes-grid" class="notes-grid"></div>
+      </div>
+
+      <div id="others-section" class="notes-group">
+        <h2 id="others-label" class="section-label hidden">Autres notes</h2>
+        <div id="notes-grid" class="notes-grid"></div>
+      </div>
+
+      <div id="notes-empty" class="empty-state hidden">
+        <div class="empty-icon" aria-hidden="true">💡</div>
+        <p class="empty-title">Aucune note pour le moment</p>
+        <p class="empty-sub">Appuyez sur <strong>+</strong> ou sur la barre ci-dessus pour ajouter votre première note colorée.</p>
+      </div>
+    </section>
+
+    <!-- TODOS VIEW -->
+    <section id="view-todos" class="view hidden" aria-label="Ma Todo List">
+      <!-- Quick Add Todo Form -->
+      <form id="quick-todo-form" class="quick-todo-card">
+        <div class="quick-todo-top">
+          <input
+            type="text"
+            id="quick-todo-title"
+            class="quick-todo-input"
+            placeholder="Ajouter une tâche..."
+            aria-label="Nouvelle tâche"
+            required
+          />
+          <button type="submit" class="btn btn-primary">Ajouter</button>
+        </div>
+        <div class="quick-todo-options">
+          <label class="inline-field">
+            <span>Priorité :</span>
+            <select id="quick-todo-priority" aria-label="Priorité">
+              <option value="normal" selected>Normale</option>
+              <option value="high">Haute 🔥</option>
+              <option value="low">Basse</option>
+            </select>
+          </label>
+          <label class="inline-field">
+            <span>Rappel Telegram :</span>
+            <input type="datetime-local" id="quick-todo-reminder" aria-label="Date et heure du rappel" />
+          </label>
+        </div>
+      </form>
+
+      <!-- Todo Progress & Filters -->
+      <div class="todo-toolbar">
+        <div class="filter-pills" role="group" aria-label="Filtrer les tâches">
+          <button type="button" class="pill active" data-filter="all">Toutes</button>
+          <button type="button" class="pill" data-filter="active">À faire</button>
+          <button type="button" class="pill" data-filter="high">Urgentes</button>
+          <button type="button" class="pill" data-filter="done">Terminées</button>
+        </div>
+        <div class="todo-progress" id="todo-progress">
+          <span id="todo-progress-text">0 / 0 terminées</span>
+          <div class="progress-track">
+            <div class="progress-fill" id="todo-progress-fill" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="todos-list" class="todos-list"></div>
+
+      <div id="todos-empty" class="empty-state hidden">
+        <div class="empty-icon" aria-hidden="true">🎉</div>
+        <p class="empty-title">Aucune tâche dans cette liste</p>
+        <p class="empty-sub">Ajoutez une tâche avec une date de rappel pour recevoir une notification Telegram automatique.</p>
+      </div>
+    </section>
+
+    <!-- ARCHIVES VIEW -->
+    <section id="view-archives" class="view hidden" aria-label="Notes archivées">
+      <div id="archives-grid" class="notes-grid"></div>
+      <div id="archives-empty" class="empty-state hidden">
+        <div class="empty-icon" aria-hidden="true">📦</div>
+        <p class="empty-title">Aucune note archivée</p>
+        <p class="empty-sub">Les notes que vous archivez apparaîtront ici.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Floating Action Button (Mobile & Quick Access) -->
+  <button type="button" id="fab-add" class="fab" aria-label="Ajouter">
+    <span aria-hidden="true">+</span>
+  </button>
+
+  <!-- NOTE EDITOR DIALOG -->
+  <dialog id="note-dialog" class="modal-dialog" aria-labelledby="note-dialog-title">
+    <form id="note-form" method="dialog" class="modal-card">
+      <div class="modal-header">
+        <h2 id="note-dialog-title">Nouvelle note</h2>
+        <div class="modal-header-actions">
+          <button type="button" id="note-pin-btn" class="icon-btn" title="Épingler" aria-label="Épingler la note" aria-pressed="false">📌</button>
+          <button type="button" id="note-archive-btn" class="icon-btn" title="Archiver" aria-label="Archiver la note" aria-pressed="false">📦</button>
+          <button type="button" class="icon-btn close-dialog" data-close="note-dialog" aria-label="Fermer">✕</button>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <input type="hidden" id="note-id" />
+        <input type="text" id="note-title" class="input-title" placeholder="Titre" maxlength="140" />
+        <textarea id="note-content" class="input-textarea" rows="6" placeholder="Écrivez votre note ici..."></textarea>
+
+        <div class="field-group">
+          <span class="field-label">Couleur</span>
+          <div class="color-picker" id="note-color-picker" role="radiogroup" aria-label="Couleur de la note">
+            <button type="button" class="color-swatch active" data-color="default" aria-label="Par défaut" title="Par défaut"></button>
+            <button type="button" class="color-swatch" data-color="coral" aria-label="Corail" title="Corail"></button>
+            <button type="button" class="color-swatch" data-color="peach" aria-label="Pêche" title="Pêche"></button>
+            <button type="button" class="color-swatch" data-color="sand" aria-label="Sable" title="Sable"></button>
+            <button type="button" class="color-swatch" data-color="mint" aria-label="Menthe" title="Menthe"></button>
+            <button type="button" class="color-swatch" data-color="sage" aria-label="Sauge" title="Sauge"></button>
+            <button type="button" class="color-swatch" data-color="fog" aria-label="Brume" title="Brume"></button>
+            <button type="button" class="color-swatch" data-color="lavender" aria-label="Lavande" title="Lavande"></button>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="note-reminder">🔔 Rappel Telegram (optionnel)</label>
+          <div class="reminder-row">
+            <input type="datetime-local" id="note-reminder" class="input-field" />
+            <button type="button" id="note-clear-reminder" class="btn btn-ghost small">Effacer</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <div class="modal-footer-left">
+          <button type="button" id="note-delete-btn" class="btn btn-danger hidden">Supprimer</button>
+          <button type="button" id="note-telegram-btn" class="btn btn-ghost" title="Envoyer maintenant sur Telegram">✈️ Telegram</button>
+        </div>
+        <div class="modal-footer-right">
+          <button type="button" class="btn btn-ghost close-dialog" data-close="note-dialog">Annuler</button>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- TODO EDITOR DIALOG -->
+  <dialog id="todo-dialog" class="modal-dialog" aria-labelledby="todo-dialog-title">
+    <form id="todo-form" method="dialog" class="modal-card">
+      <div class="modal-header">
+        <h2 id="todo-dialog-title">Modifier la tâche</h2>
+        <button type="button" class="icon-btn close-dialog" data-close="todo-dialog" aria-label="Fermer">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <input type="hidden" id="todo-id" />
+        <div class="field-group">
+          <label class="field-label" for="todo-title">Tâche</label>
+          <input type="text" id="todo-title" class="input-field" placeholder="Titre de la tâche" required />
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="todo-notes">Détails (optionnel)</label>
+          <textarea id="todo-notes" class="input-textarea" rows="3" placeholder="Informations supplémentaires..."></textarea>
+        </div>
+
+        <div class="field-row">
+          <div class="field-group">
+            <label class="field-label" for="todo-priority">Priorité</label>
+            <select id="todo-priority" class="input-field">
+              <option value="low">Basse</option>
+              <option value="normal">Normale</option>
+              <option value="high">Haute 🔥</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="todo-reminder">🔔 Rappel Telegram</label>
+            <input type="datetime-local" id="todo-reminder" class="input-field" />
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <div class="modal-footer-left">
+          <button type="button" id="todo-delete-btn" class="btn btn-danger hidden">Supprimer</button>
+          <button type="button" id="todo-telegram-btn" class="btn btn-ghost">✈️ Telegram</button>
+        </div>
+        <div class="modal-footer-right">
+          <button type="button" class="btn btn-ghost close-dialog" data-close="todo-dialog">Annuler</button>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- SETTINGS DIALOG -->
+  <dialog id="settings-dialog" class="modal-dialog" aria-labelledby="settings-dialog-title">
+    <form id="settings-form" method="dialog" class="modal-card">
+      <div class="modal-header">
+        <h2 id="settings-dialog-title">⚙️ Paramètres</h2>
+        <button type="button" class="icon-btn close-dialog" data-close="settings-dialog" aria-label="Fermer">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="settings-status" id="settings-connection-status">
+          Mode local uniquement (non relié à Google Sheets)
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="setting-api-url">URL Google Apps Script (Web App)</label>
+          <input
+            type="url"
+            id="setting-api-url"
+            class="input-field"
+            placeholder="https://script.google.com/macros/s/.../exec"
+          />
+          <small class="field-help">Collez l'URL obtenue après le déploiement de <code>Code.gs</code> dans votre Google Sheet.</small>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="setting-api-token">Clé secrète API (optionnel)</label>
+          <input
+            type="password"
+            id="setting-api-token"
+            class="input-field"
+            placeholder="Identique à API_TOKEN dans l'onglet Config"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="settings-actions-grid">
+          <button type="button" id="btn-test-telegram" class="btn btn-secondary">✈️ Tester Telegram</button>
+          <button type="button" id="btn-daily-summary" class="btn btn-secondary">📅 Envoyer résumé du jour</button>
+          <button type="button" id="btn-push-local" class="btn btn-secondary">⬆️ Envoyer données locales vers Sheet</button>
+          <button type="button" id="btn-export-json" class="btn btn-secondary">💾 Sauvegarde JSON</button>
+        </div>
+
+        <div id="pwa-install-box" class="install-box hidden">
+          <div>
+            <strong>Installer sur Android</strong>
+            <p class="field-help">Ajoutez KeepSheet sur votre écran d'accueil pour l'utiliser comme une vraie application.</p>
+          </div>
+          <button type="button" id="btn-install-pwa" class="btn btn-primary">Installer</button>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <div class="modal-footer-left"></div>
+        <div class="modal-footer-right">
+          <button type="button" class="btn btn-ghost close-dialog" data-close="settings-dialog">Fermer</button>
+          <button type="submit" class="btn btn-primary">Enregistrer &amp; Synchroniser</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
