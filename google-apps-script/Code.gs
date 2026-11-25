@@ -17,6 +17,11 @@
 const SHEET_NOTES = 'Notes';
 const SHEET_TODOS = 'Todos';
 const SHEET_CONFIG = 'Config';
+// Trace des suppressions définitives : empêche un appareil resté hors ligne
+// de recréer un élément supprimé ailleurs.
+const SHEET_DELETED = 'Supprimés';
+const DELETED_HEADERS = ['id', 'deletedAt'];
+const DELETED_RETENTION_DAYS = 180;
 
 const NOTES_HEADERS = [
   'id',
@@ -602,12 +607,46 @@ function emptyTrash_() {
     if (!sheet || sheet.getLastRow() < 2) return;
     const delCol = headers.indexOf('deletedAt');
     const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+    const removedIds = [];
     for (let i = rows.length - 1; i >= 0; i--) {
       if (rows[i][delCol]) {
+        removedIds.push(rows[i][0]);
         sheet.deleteRow(i + 2);
       }
     }
+    addTombstones_(removedIds);
   });
+  pruneTombstones_();
+}
+
+function tombstoneSheet_() {
+  return ensureSheet_(SpreadsheetApp.getActiveSpreadsheet(), SHEET_DELETED, DELETED_HEADERS);
+}
+
+function addTombstones_(ids) {
+  const clean = (ids || []).filter(Boolean);
+  if (clean.length === 0) return;
+  const sheet = tombstoneSheet_();
+  const now = new Date().toISOString();
+  const rows = clean.map((id) => [id, now]);
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 2).setValues(rows);
+}
+
+function isTombstoned_(id) {
+  const sheet = tombstoneSheet_();
+  if (sheet.getLastRow() < 2) return false;
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues().flat().indexOf(id) !== -1;
+}
+
+function pruneTombstones_() {
+  const sheet = tombstoneSheet_();
+  if (sheet.getLastRow() < 2) return;
+  const limit = Date.now() - DELETED_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const d = parseDate_(rows[i][1]);
+    if (d && d.getTime() < limit) sheet.deleteRow(i + 2);
+  }
 }
 
 // ============================================================================
@@ -686,6 +725,7 @@ function readRecords_(sheetName, headers) {
 
 function upsertRecord_(sheetName, headers, record) {
   if (!record || !record.id) throw new Error('Champ id manquant.');
+  if (isTombstoned_(record.id)) return false; // supprimé définitivement ailleurs
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ensureSheet_(ss, sheetName, headers);
 
@@ -717,6 +757,18 @@ function upsertRecord_(sheetName, headers, record) {
         values[notifiedIdx] = true;
       }
 
+      // Rappel récurrent déjà envoyé puis reprogrammé par le serveur : un appareil
+      // qui renvoie l'ancienne date (déjà passée) ne doit pas déclencher un doublon.
+      const reminderIdx = headers.indexOf('reminderAt');
+      if (reminderIdx !== -1 && record.recurrence && record.recurrence === current.recurrence) {
+        const incoming = parseDate_(record.reminderAt);
+        const stored = parseDate_(current.reminderAt);
+        if (incoming && stored && incoming <= new Date() && stored > incoming) {
+          values[reminderIdx] = current.reminderAt;
+          if (notifiedIdx !== -1) values[notifiedIdx] = current.notified;
+        }
+      }
+
       sheet.getRange(rowNum, 1, 1, headers.length).setValues([values]);
       return true;
     }
@@ -735,6 +787,7 @@ function sameInstant_(a, b) {
 
 function deleteRecord_(sheetName, id) {
   if (!id) return;
+  addTombstones_([id]);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet || sheet.getLastRow() < 2) return;

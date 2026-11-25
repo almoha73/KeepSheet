@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 'v1.15';
+  const APP_VERSION = 'v1.16';
   const STORAGE_KEY = 'keepsheet_data_v1';
   const SETTINGS_KEY = 'keepsheet_settings_v1';
   const THEME_KEY = 'keepsheet_theme_v1';
@@ -34,6 +34,8 @@
     queue: [],
     flushPromise: null,
     syncPromise: null,
+    // Dernière erreur de synchro, affichée dans le bandeau jusqu'à la prochaine réussite
+    syncError: '',
     lastSyncAt: 0,
   };
 
@@ -395,6 +397,7 @@
 
       state.settings.apiUrl = apiUrl;
       state.settings.apiToken = apiToken;
+      state.syncError = '';
       saveSettings();
       updateConnectionBanner();
 
@@ -1684,7 +1687,14 @@
       ? ` ${pending} modification(s) en attente d’envoi vers Google Sheets.`
       : '';
     if (!navigator.onLine) {
+      banner.classList.remove('error');
       banner.textContent = `📡 Hors ligne — vos modifications sont enregistrées localement.${pendingText}`;
+      banner.classList.remove('hidden');
+      return;
+    }
+    banner.classList.toggle('error', Boolean(state.syncError));
+    if (state.syncError && state.settings.apiUrl) {
+      banner.textContent = `⚠️ Synchro impossible : ${state.syncError}${pendingText} Touchez 🔄 pour réessayer.`;
       banner.classList.remove('hidden');
       return;
     }
@@ -1758,11 +1768,15 @@
       renderAll();
       updateConnectionBanner();
       state.lastSyncAt = Date.now();
+      if (state.queue.length === 0) state.syncError = '';
+      updateConnectionBanner();
       if (!silent) showToast('Synchronisé avec Google Sheets ✅');
       return true;
     } catch (err) {
       console.error(err);
       const msg = `Erreur de synchro : ${err.message}`;
+      state.syncError = err.message;
+      updateConnectionBanner();
       setSettingsFeedback(msg, 'error');
       if (!silent) showToast(msg, 'error');
       return false;
@@ -1830,28 +1844,7 @@
   }
 
   function enqueueAction(action, payload) {
-    const snapshot = JSON.parse(JSON.stringify(payload || {}));
-    const isNoteItem = action === 'saveNote' || action === 'deleteNote';
-    const isTodoItem = action === 'saveTodo' || action === 'deleteTodo';
-
-    if (isNoteItem || isTodoItem) {
-      // Seule la dernière version d'un élément compte : on remplace l'ancienne
-      const related = isNoteItem ? ['saveNote', 'deleteNote'] : ['saveTodo', 'deleteTodo'];
-      state.queue = state.queue.filter(
-        (q) => !(related.includes(q.action) && q.payload && q.payload.id === snapshot.id)
-      );
-    } else if (action === 'reorderNotes') {
-      const previous = state.queue.find((q) => q.action === 'reorderNotes');
-      if (previous) {
-        const merged = new Map();
-        (previous.payload.order || []).forEach((o) => merged.set(o.id, o.position));
-        (snapshot.order || []).forEach((o) => merged.set(o.id, o.position));
-        snapshot.order = Array.from(merged, ([id, position]) => ({ id, position }));
-        state.queue = state.queue.filter((q) => q !== previous);
-      }
-    }
-
-    state.queue.push({ action, payload: snapshot });
+    state.queue = window.KeepSheetQueue.enqueue(state.queue, action, payload);
     saveQueue();
     updateConnectionBanner();
   }
@@ -1874,9 +1867,11 @@
           state.queue = state.queue.filter((q) => q !== item);
           saveQueue();
         }
+        state.syncError = '';
         return true;
       } catch (err) {
         console.error(err);
+        state.syncError = err.message;
         showToast(
           `Synchro en attente (${state.queue.length}) : ${err.message}`,
           'error'
@@ -1893,27 +1888,12 @@
 
   // Ré-applique les actions non envoyées sur les données reçues du Sheet
   function applyPendingQueue() {
-    state.queue.forEach(({ action, payload }) => {
-      if (action === 'saveNote' || action === 'saveTodo') {
-        const key = action === 'saveNote' ? 'notes' : 'todos';
-        const copy = JSON.parse(JSON.stringify(payload));
-        const idx = state[key].findIndex((x) => x.id === copy.id);
-        if (idx === -1) state[key].unshift(copy);
-        else state[key][idx] = copy;
-      } else if (action === 'deleteNote') {
-        state.notes = state.notes.filter((n) => n.id !== payload.id);
-      } else if (action === 'deleteTodo') {
-        state.todos = state.todos.filter((t) => t.id !== payload.id);
-      } else if (action === 'emptyTrash') {
-        state.notes = state.notes.filter((n) => !n.deletedAt);
-        state.todos = state.todos.filter((t) => !t.deletedAt);
-      } else if (action === 'reorderNotes') {
-        (payload.order || []).forEach(({ id, position }) => {
-          const note = state.notes.find((n) => n.id === id);
-          if (note) note.position = position;
-        });
-      }
-    });
+    const merged = window.KeepSheetQueue.applyPending(
+      { notes: state.notes, todos: state.todos },
+      state.queue
+    );
+    state.notes = merged.notes;
+    state.todos = merged.todos;
   }
 
   function pushAction(action, payload) {

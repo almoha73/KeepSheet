@@ -1,8 +1,9 @@
-const CACHE_NAME = 'keepsheet-shell-v15';
+const CACHE_NAME = 'keepsheet-shell-v16';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
+  './queue.js',
   './app.js',
   './manifest.json',
   './icons/icon.svg',

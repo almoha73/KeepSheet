@@ -49,6 +49,8 @@ Après avoir collé une nouvelle version de `Code.gs` : **Déployer → Gérer l
 ### Bon à savoir
 - **Hors ligne** : vos modifications sont mises en file d'attente et envoyées automatiquement au retour du réseau.
 - **Plusieurs appareils** : en cas de modification concurrente d'un même élément, la version la plus récente l'emporte.
+- **Suppressions définitives** : l'onglet `Supprimés` garde 180 jours la trace des éléments supprimés, pour qu'un appareil resté hors ligne ne puisse pas les recréer. Ne le supprimez pas.
+- **Erreurs de synchro** : elles s'affichent en rouge dans le bandeau en haut de l'application jusqu'à la prochaine synchro réussie.
 - **Tâches récurrentes** : le rappel Telegram est envoyé une fois ; la tâche est reprogrammée quand vous la cochez.
 - Les rappels sont vérifiés **toutes les minutes** (quota Google gratuit : 90 min d'exécution de déclencheurs par jour, largement suffisant pour un usage personnel).
 
@@ -67,3 +69,16 @@ Pour qu'Android Chrome propose l'installation en tant qu'application (**PWA**), 
 3. Ouvrez **KeepSheet** depuis votre écran d'accueil, cliquez sur **`⚙️`**, collez l'URL Google Apps Script (`/exec`) et votre `API_TOKEN`, puis cliquez sur **Enregistrer & Synchroniser**.
 
 > **Astuce** : vous pouvez aussi tester l'application immédiatement en local (mode hors-ligne) simplement en ouvrant `index.html` dans votre navigateur !
+
+---
+
+## Tests (développeurs)
+
+Nécessite Node.js 18 ou plus, sans aucune dépendance :
+
+```bash
+npm test
+```
+
+Les tests vérifient le backend `Code.gs` (dans un faux Google Sheets en mémoire) et la file d'attente hors ligne (`queue.js`).
+
